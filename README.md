@@ -1,4 +1,43 @@
-# Symphonic Fracture 交響奇幻：聲界破滅
+# Music Battle
+
+Two playable browser games built from the studio's design docs:
+
+1. **[Symphonic Fracture](#symphonic-fracture-交響奇幻聲界破滅)** (repo root) — 2D floating-instrument roguelite
+2. **[Soundwave Strike](#soundwave-strike-樂浪突擊)** (`soundwave-strike/`) — 3D FPS with online PvP
+
+---
+
+## Soundwave Strike 樂浪突擊
+
+A 3D first-person shooter from the Soundwave Strike proposal: instrument
+guns, a rain-soaked night cargo yard under a neon skyline, and every shot
+quantized to the music. Open `soundwave-strike/index.html` (serve the folder
+over HTTP for module-free script loading, e.g. `python3 -m http.server`).
+
+- **Arsenal (per the proposal's mapping):** trumpet = shotgun, snare = SMG,
+  trombone = sniper (RMB zoom), tuba = rocket launcher with splash knockback
+  (rocket jumps work).
+- **Movement:** sprint, jump, power slide (vinyl-scratch sfx), and the
+  proposal's **Beat Dash** — dash on the musical beat for bonus distance.
+  Sonic jump pads launch you to catwalk height.
+- **Deathmatch vs bots:** 5 AI combatants with line-of-sight checks, free-for-all
+  scoring, kill feed, scoreboard, first-to-20 or 5:00.
+- **Online PvP (published artifact only):** uses the artifact `room`
+  capability — everyone viewing the artifact is a peer. Movement replicates
+  through presence (~20 Hz), shots/hits/deaths through room events;
+  damage is victim-authoritative. No game server anywhere.
+- **Art:** procedural canvas textures (asphalt, concrete, ribbed containers,
+  building facades), real-time shadow maps, ACES filmic tone mapping, rain,
+  sodium work lights, and beat-reactive neon signage.
+- **Audio:** procedural 120 BPM electro underscore; all weapon sounds are
+  synthesized and quantized to E minor, with sidechain ducking on heavy hits.
+
+Three.js r128 is vendored at `soundwave-strike/vendor/three.min.js`; the
+published artifact loads the same build from cdnjs.
+
+---
+
+## Symphonic Fracture 交響奇幻：聲界破滅
 
 A playable browser build of the **Symphonic Fracture** GDD — a roguelite arena
 action game where every weapon is a floating classical instrument and every
