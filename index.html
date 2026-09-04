@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Symphonic Fracture 交響奇幻：聲界破滅</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎻</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="game-wrap">
+  <canvas id="game"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="hud-top">
+      <div id="wave-label">MOVEMENT I</div>
+      <div id="score-label">0</div>
+    </div>
+    <div id="hud-bottom">
+      <div id="hp-wrap">
+        <div class="bar-label">RESONANCE</div>
+        <div class="bar"><div id="hp-bar"></div></div>
+      </div>
+      <div id="bass-wrap">
+        <div class="bar-label">BASS DROP <span class="key-hint">[Q]</span></div>
+        <div class="bar"><div id="bass-bar"></div></div>
+      </div>
+      <div id="weapon-dock"></div>
+    </div>
+    <div id="combo-label" class="hidden">COMBO ×1</div>
+  </div>
+
+  <!-- Start menu -->
+  <div id="menu" class="screen">
+    <div class="menu-inner">
+      <div class="title-kicker">A ROGUELITE OF SOUND AND RUIN</div>
+      <h1 class="title">SYMPHONIC<br>FRACTURE</h1>
+      <div class="title-zh">交響奇幻：聲界破滅</div>
+      <div class="menu-controls">
+        <div><span class="key">WASD</span> move</div>
+        <div><span class="key">MOUSE</span> aim</div>
+        <div><span class="key">LMB</span> flute — wind blades</div>
+        <div><span class="key">RMB</span> trumpet — concussive blast</div>
+        <div><span class="key">E</span> violin — chain laser</div>
+        <div><span class="key">SPACE</span> dash</div>
+        <div><span class="key">Q</span> bass drop (when charged)</div>
+      </div>
+      <button id="start-btn" class="big-btn">BEGIN THE OVERTURE</button>
+      <div class="menu-foot">Stack debuffs. Detonate them with the drums. Survive the dissonance.</div>
+    </div>
+  </div>
+
+  <!-- Upgrade picker -->
+  <div id="upgrade" class="screen hidden">
+    <div class="menu-inner">
+      <div class="title-kicker">INTERMISSION</div>
+      <h2 class="subtitle">CHOOSE AN ENCORE</h2>
+      <div id="upgrade-cards"></div>
+    </div>
+  </div>
+
+  <!-- Game over -->
+  <div id="gameover" class="screen hidden">
+    <div class="menu-inner">
+      <div class="title-kicker">THE HALL FALLS SILENT</div>
+      <h1 class="title small">FINALE</h1>
+      <div id="go-stats"></div>
+      <button id="retry-btn" class="big-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/audio.js"></script>
+<script src="js/art.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/weapons.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
