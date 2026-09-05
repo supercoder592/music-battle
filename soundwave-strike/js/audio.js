@@ -169,6 +169,31 @@ class SWAudio {
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
   }
 
+  /* ── 空間定位: 敵火/爆炸依世界座標做左右分聲+距離衰減 ──
+     playAt(pos, fn) 內呼叫的音效會自動路由到定位鏈; 其餘照走中置。 */
+  playAt(pos, fn) {
+    if (!this.enabled || !pos || !window.GAME) { fn(); return; }
+    const g = window.GAME;
+    const dx = pos.x - g.pos.x, dz = pos.z - g.pos.z;
+    const dy = (pos.y || 0) - (g.pos.y + 1.6);
+    const dist = Math.hypot(dx, dz, dy);
+    const len = Math.hypot(dx, dz) || 1;
+    // pan = 來源方向在玩家右向量上的投影
+    const pan = Math.max(-1, Math.min(1, (dx * Math.cos(g.yaw) - dz * Math.sin(g.yaw)) / len));
+    const vol = Math.max(0.04, Math.min(1, 16 / (5 + dist)));
+    const gn = this.ctx.createGain();
+    gn.gain.value = vol;
+    if (this.ctx.createStereoPanner) {
+      const p = this.ctx.createStereoPanner();
+      p.pan.value = pan * 0.85;
+      gn.connect(p); p.connect(this._dest());
+    } else gn.connect(this._dest());
+    this._spNode = gn;
+    try { fn(); } finally { this._spNode = null; }
+  }
+
+  _dest() { return this._spNode || this.sfxBus; }
+
   /* ── weapon voices ──
      Real brass synthesis: detuned sawtooths through a lowpass whose
      cutoff *opens* during the attack (the "wah" that makes brass read
@@ -186,7 +211,7 @@ class SWAudio {
     g.gain.exponentialRampToValueAtTime(vol, t + 0.025);
     g.gain.setValueAtTime(vol, t + dur * 0.55);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    flt.connect(g); g.connect(this.sfxBus);
+    flt.connect(g); g.connect(this._dest());
     for (const det of [1, 1.006, 0.994]) {
       const o = this.ctx.createOscillator();
       o.type = 'sawtooth';
@@ -228,7 +253,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.12, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    o.connect(g); g.connect(this.sfxBus);
+    o.connect(g); g.connect(this._dest());
     o.start(t); o.stop(t + 0.09);
     // snare wires
     const buzz = this.ctx.createBufferSource();
@@ -238,7 +263,7 @@ class SWAudio {
     const bg = this.ctx.createGain();
     bg.gain.setValueAtTime(0.13, t);
     bg.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-    buzz.connect(bf); bf.connect(bg); bg.connect(this.sfxBus);
+    buzz.connect(bf); bf.connect(bg); bg.connect(this._dest());
     buzz.start(t);
     // stick snap
     this._blastNoise(t, 0.025, 5200, 0.07);
@@ -256,7 +281,7 @@ class SWAudio {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
-    flt.connect(g); g.connect(this.sfxBus);
+    flt.connect(g); g.connect(this._dest());
     for (const det of [1, 1.005]) {
       const o = this.ctx.createOscillator();
       o.type = 'sawtooth';
@@ -281,7 +306,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.26, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
-    o.connect(g); g.connect(this.sfxBus);
+    o.connect(g); g.connect(this._dest());
     o.start(t); o.stop(t + 0.6);
     this._blastNoise(t, 0.3, 500, 0.16, true);
     this.duck(0.4, 0.4);
@@ -297,7 +322,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.45, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
-    o.connect(g); g.connect(this.sfxBus);
+    o.connect(g); g.connect(this._dest());
     o.start(t); o.stop(t + 0.85);
     this._blastNoise(t, 0.5, 380, 0.32);
     this.duck(0.15, 0.7);
@@ -315,7 +340,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + len);
-    src.connect(f); f.connect(g); g.connect(this.sfxBus);
+    src.connect(f); f.connect(g); g.connect(this._dest());
     src.start(t);
   }
 
@@ -336,7 +361,7 @@ class SWAudio {
         g.gain.setValueAtTime(0.0001, t);
         g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
         g.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
-        o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
+        o.connect(flt); flt.connect(g); g.connect(this._dest());
         o.start(t); o.stop(t + 0.12);
       }
     }
@@ -353,7 +378,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.42, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
-    o.connect(g); g.connect(this.sfxBus);
+    o.connect(g); g.connect(this._dest());
     o.start(t); o.stop(t + 0.55);
     this._blastNoise(t, 0.12, 320, 0.2);
     this.duck(0.35, 0.4);
@@ -380,7 +405,7 @@ class SWAudio {
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.11, t + 0.025);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
-      o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
+      o.connect(flt); flt.connect(g); g.connect(this._dest());
       o.start(t); o.stop(t + 0.27);
     }
     // bow-hair scrape
@@ -391,7 +416,7 @@ class SWAudio {
     const bg = this.ctx.createGain();
     bg.gain.setValueAtTime(0.045, t);
     bg.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
-    src.connect(bf); bf.connect(bg); bg.connect(this.sfxBus);
+    src.connect(bf); bf.connect(bg); bg.connect(this._dest());
     src.start(t);
   }
 
@@ -408,7 +433,7 @@ class SWAudio {
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(v, t + 0.004); // instant strike
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(g); g.connect(this.sfxBus);
+      o.connect(g); g.connect(this._dest());
       o.start(t); o.stop(t + dur + 0.05);
     }
     this._blastNoise(t, 0.012, 9000, 0.03); // beater click
@@ -425,7 +450,7 @@ class SWAudio {
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.16, t + dt);
       g.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.06);
-      src.connect(f); f.connect(g); g.connect(this.sfxBus);
+      src.connect(f); f.connect(g); g.connect(this._dest());
       src.start(t + dt);
     }
   }
@@ -443,7 +468,7 @@ class SWAudio {
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.09, t);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-      o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
+      o.connect(flt); flt.connect(g); g.connect(this._dest());
       o.start(t); o.stop(t + 0.32);
     }
     const src = this.ctx.createBufferSource();
@@ -456,7 +481,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.06, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-    src.connect(f); f.connect(g); g.connect(this.sfxBus);
+    src.connect(f); f.connect(g); g.connect(this._dest());
     src.start(t);
   }
 
@@ -469,7 +494,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.09, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    o.connect(g); g.connect(this.sfxBus);
+    o.connect(g); g.connect(this._dest());
     o.start(t); o.stop(t + 0.1);
   }
 
@@ -484,7 +509,7 @@ class SWAudio {
       const tt = t + i * 0.06;
       g.gain.setValueAtTime(0.1, tt);
       g.gain.exponentialRampToValueAtTime(0.001, tt + 0.3);
-      o.connect(g); g.connect(this.sfxBus);
+      o.connect(g); g.connect(this._dest());
       o.start(tt); o.stop(tt + 0.35);
     });
   }
@@ -502,7 +527,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.14, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-    src.connect(f); f.connect(g); g.connect(this.sfxBus);
+    src.connect(f); f.connect(g); g.connect(this._dest());
     src.start(t);
     if (boosted) { // on-beat stab reward
       const o = this.ctx.createOscillator();
@@ -511,7 +536,7 @@ class SWAudio {
       const g2 = this.ctx.createGain();
       g2.gain.setValueAtTime(0.07, t);
       g2.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-      o.connect(g2); g2.connect(this.sfxBus);
+      o.connect(g2); g2.connect(this._dest());
       o.start(t); o.stop(t + 0.22);
     }
   }
@@ -529,7 +554,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.1, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-    src.connect(f); f.connect(g); g.connect(this.sfxBus);
+    src.connect(f); f.connect(g); g.connect(this._dest());
     src.start(t);
   }
 
@@ -543,7 +568,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.16, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-    o.connect(g); g.connect(this.sfxBus);
+    o.connect(g); g.connect(this._dest());
     o.start(t); o.stop(t + 0.32);
   }
 
@@ -557,7 +582,7 @@ class SWAudio {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.14, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-    o.connect(g); g.connect(this.sfxBus);
+    o.connect(g); g.connect(this._dest());
     o.start(t); o.stop(t + 0.22);
   }
 
@@ -572,7 +597,7 @@ class SWAudio {
       const tt = t + i * 0.09;
       g.gain.setValueAtTime(0.07, tt);
       g.gain.exponentialRampToValueAtTime(0.001, tt + 0.35);
-      o.connect(g); g.connect(this.sfxBus);
+      o.connect(g); g.connect(this._dest());
       o.start(tt); o.stop(tt + 0.4);
     });
     this.duck(0.25, 0.9);
@@ -588,7 +613,7 @@ class SWAudio {
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.035, t + dt);
       g.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.04);
-      o.connect(g); g.connect(this.sfxBus);
+      o.connect(g); g.connect(this._dest());
       o.start(t + dt); o.stop(t + dt + 0.05);
     }
   }

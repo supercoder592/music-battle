@@ -139,6 +139,33 @@ class Actor {
     this.parts.legR.rotation.x = -sw;
   }
 
+  /* begin the topple-and-sink death animation */
+  startDeath(dir) {
+    const d = dir && dir.lengthSq() > 0.01 ? dir.clone().setY(0).normalize()
+      : new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+    this.deathAnim = { t: 0, dir: d, spin: (Math.random() - 0.5) * 2 };
+    this.model.rotation.y = Math.atan2(-d.x, -d.z); // face the direction of the shove
+    this.setVisible(true);
+  }
+
+  /* topple → slide → sink → gone; call each frame while dead */
+  playDeathAnim(dt) {
+    const a = this.deathAnim;
+    if (!a) return;
+    a.t += dt;
+    const k = Math.min(1, a.t / 0.45);
+    this.model.rotation.x = -(Math.PI / 2) * (k * k);   // fall from the feet
+    this.model.rotation.z = a.spin * 0.25 * k;
+    const slide = Math.max(0, 1 - a.t / 0.6) * 3.2 * dt;
+    this.model.position.x += a.dir.x * slide;
+    this.model.position.z += a.dir.z * slide;
+    if (a.t > 1.7) this.model.position.y -= dt * 1.4;   // sink into the stage
+    if (a.t > 2.6) {
+      this.setVisible(false);
+      this.deathAnim = null;
+    }
+  }
+
   dispose(scene) {
     scene.remove(this.model);
   }
@@ -177,6 +204,9 @@ class Bot extends Actor {
     this.vel.set(0, 0, 0);
     this.hp = 100;
     this.alive = true;
+    this.deathAnim = null;
+    this.model.rotation.set(0, this.yaw, 0);
+    this.model.position.copy(this.pos);
     this.setVisible(true);
     this.nav = null;
     this.enemy = null;
@@ -186,11 +216,11 @@ class Bot extends Actor {
     }
   }
 
-  die() {
+  die(dir) {
     this.alive = false;
     this.deaths++;
-    this.setVisible(false);
     this.respawnTimer = this.dummy ? 2 : 3;
+    this.startDeath(dir);
     VFX.noteBurst(this.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), this.colorHex, 5);
     VFX.spark(this.pos.clone().add(new THREE.Vector3(0, 1, 0)), this.colorHex, 16, 6);
   }
@@ -200,6 +230,7 @@ class Bot extends Actor {
   update(dt) {
     const g = this.game;
     if (!this.alive) {
+      this.playDeathAnim(dt);
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) this.respawn();
       return;
@@ -351,8 +382,8 @@ class Bot extends Actor {
     this.parts.muzzle.getWorldPosition(mzl);
     VFX.tracer(mzl, end, wDef.tracerColor);
     VFX.flash(mzl, wDef.tracerColor, 1.2, 5);
-    // their instrument, audible when the fight is near
-    if (dist < 55 && Math.random() < 0.45) wDef.sfx();
+    // their instrument, positioned in the stereo field
+    if (dist < 60 && Math.random() < 0.6) AUDIO.playAt(mzl, () => wDef.sfx());
     if (hit && hit.actor) g.applyDamage(hit.actor, 7, this, hit.point);
     else if (hit) VFX.spark(hit.point, 0xaab0c0, 4, 5);
   }
@@ -375,7 +406,15 @@ class RemoteAvatar extends Actor {
   }
 
   update(dt) {
-    if (!this.alive) { this.setVisible(false); return; }
+    if (!this.alive) {
+      // topple animation, then hidden until presence revives them
+      if (this.deathAnim) this.playDeathAnim(dt);
+      else if (!this._deadShown) { this.setVisible(false); }
+      return;
+    }
+    this._deadShown = false;
+    this.model.rotation.x = 0;
+    this.model.rotation.z = 0;
     const renderT = performance.now() / 1000 - 0.13; // interpolation delay
     const s = this.snaps;
     if (s.length === 0) return;

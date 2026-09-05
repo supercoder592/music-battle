@@ -363,7 +363,9 @@ class Game {
         av.kills = pr.k || 0;
         av.deaths = pr.d || 0;
         av.hp = pr.hp != null ? pr.hp : 100;
+        const wasAlive = av.alive;
         av.alive = pr.st === 'game' && av.hp > 0;
+        if (wasAlive && !av.alive) av.startDeath(null); // saw them drop — topple
         if (typeof pr.x === 'number') av.pushSnap({ x: pr.x, y: pr.y, z: pr.z, yaw: pr.yw || 0, pitch: pr.pt || 0 });
       }
     }
@@ -386,7 +388,7 @@ class Game {
     VFX.flash(from, w.tracerColor, 1.1, 5);
     if (w.mode === 'projectile') VFX.spawnProjectile(wi, from, to.clone().sub(from).normalize(), m.peer);
     const dist = from.distanceTo(new THREE.Vector3(this.pos.x, this.pos.y + this.eyeH, this.pos.z));
-    if (dist < 80) w.sfx(); // their instrument, heard in your key
+    if (dist < 80) AUDIO.playAt(from, () => w.sfx()); // their instrument, positioned
   }
 
   onRemoteHit(m) {
@@ -394,7 +396,8 @@ class Game {
     if (d.t !== NET.myPeerId || !this.alive || this.state === 'menu') return;
     const dmg = Math.min(100, Math.max(0, Number(d.d) || 0));
     if (this.spawnProt > 0) return;
-    this.takeDamage(dmg, { name: this.peerName(m.peer), peer: m.peer });
+    const av = this.remotes.get(m.peer);
+    this.takeDamage(dmg, { name: this.peerName(m.peer), peer: m.peer, pos: av ? av.pos : null });
   }
 
   onRemoteDie(m) {
@@ -687,7 +690,8 @@ class Game {
     VFX.spark(point || target.eyePos(), 0xff5060, 6, 5);
     if (attacker === this) { this.showHitmarker(target.hp <= 0); AUDIO.hitmark(); }
     if (target.hp <= 0 && target.alive) {
-      target.die();
+      const from = attacker === this ? this.pos : (attacker.pos || this.pos);
+      target.die(new THREE.Vector3().subVectors(target.pos, from));
       const aName = attacker === this ? this.callsign : attacker.name;
       const icon = attacker === this ? WEAPONS[this.weaponIdx].icon : WEAPONS[attacker.w != null ? attacker.w : 1].icon;
       this.killfeed(aName, target.name, icon, attacker === this);
@@ -707,11 +711,27 @@ class Game {
     if (amp >= this.shakeAmp) { this.shakeAmp = amp; this.shakeDur = dur; this.shakeT = dur; }
   }
 
+  /* red arrow around the crosshair pointing at the damage source */
+  showDamageDir(fromPos) {
+    if (!fromPos) return;
+    const dx = fromPos.x - this.pos.x, dz = fromPos.z - this.pos.z;
+    if (dx * dx + dz * dz < 0.5) return;
+    const srcYaw = Math.atan2(-dx, -dz);
+    let rel = this.yaw - srcYaw;             // 0 = straight ahead
+    const deg = rel * 180 / Math.PI;
+    const el = $('dmg-dir');
+    el.style.transform = `translate(-50%, -100%) rotate(${deg}deg) translateY(-52px)`;
+    el.classList.remove('hidden');
+    clearTimeout(this._ddT);
+    this._ddT = setTimeout(() => el.classList.add('hidden'), 650);
+  }
+
   takeDamage(dmg, attacker) {
     if (!this.alive) return;
     if (this.mode === 'training') return; // nothing can hurt you at soundcheck
     this.hp -= dmg;
     this.lastCombat = this.time;
+    if (attacker && attacker.pos) this.showDamageDir(attacker.pos);
     AUDIO.hurt();
     $('dmg-vignette').style.opacity = Math.min(0.9, 0.35 + dmg * 0.02);
     setTimeout(() => { $('dmg-vignette').style.opacity = this.hp < 30 ? 0.35 : 0; }, 130);
@@ -1019,7 +1039,7 @@ class Game {
 
   explode(p, ownerId, wIdx = 4) {
     VFX.explosion(p);
-    AUDIO.explosion();
+    AUDIO.playAt(p, () => AUDIO.explosion());
     this.shake(wIdx === 5 ? 10 : 7, 0.35);
     const w = WEAPONS[wIdx];
     const kb = 16 * (w.kbMult || 1);
@@ -1049,7 +1069,7 @@ class Game {
       const push = new THREE.Vector3().subVectors(this.eyePos(), p).normalize().multiplyScalar(Math.max(0, 1 - dSelf / (w.splash + 1)) * kb);
       this.vel.add(push);
       if (ownerId === 'me' && this.alive && dSelf < w.splash * 0.7) {
-        this.takeDamage(Math.round((wIdx === 5 ? 10 : 20) * (1 - dSelf / w.splash)), { name: this.callsign });
+        this.takeDamage(Math.round((wIdx === 5 ? 10 : 20) * (1 - dSelf / w.splash)), { name: this.callsign, pos: p });
       } else if (attacker && attacker !== this && this.alive && dSelf < w.splash && ownerId !== 'me' && !(attacker instanceof RemoteAvatar)) {
         this.takeDamage(Math.round(w.dmg * Math.max(0.2, 1 - dSelf / w.splash)), attacker);
       }

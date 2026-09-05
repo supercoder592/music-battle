@@ -221,6 +221,17 @@ h2.subtitle {
 }
 #hitmarker.kill { color: var(--amber); font-size: 34px; }
 
+#dmg-dir {
+  position: absolute; left: 50%; top: 50%;
+  width: 0; height: 0;
+  border-left: 13px solid transparent;
+  border-right: 13px solid transparent;
+  border-bottom: 20px solid rgba(255,50,80,0.9);
+  filter: drop-shadow(0 0 8px rgba(255,50,80,0.8));
+  transform-origin: 50% 100%;
+  /* rotation set from JS: translate then rotate around center */
+}
+
 #dmg-vignette {
   position: absolute; inset: 0;
   background: radial-gradient(ellipse at center, transparent 55%, rgba(255,30,80,0.55) 100%);
