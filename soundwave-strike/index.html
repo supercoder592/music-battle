@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Soundwave Strike 樂浪突擊</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎺</text></svg>">
 <link rel="stylesheet" href="css/style.css">
@@ -41,6 +41,21 @@
     </div>
     <div id="scoreboard" class="hidden"><table id="score-table"></table></div>
   </div>
+
+  <!-- Touch controls (phones/tablets) -->
+  <div id="touch-ui" class="hidden">
+    <div id="stick-base" class="hidden"><div id="stick-nub"></div></div>
+    <div class="tbtn big"   id="tb-fire">FIRE</div>
+    <div class="tbtn"       id="tb-jump">JUMP</div>
+    <div class="tbtn"       id="tb-dash">DASH</div>
+    <div class="tbtn"       id="tb-slide">SLIDE</div>
+    <div class="tbtn"       id="tb-grap">🪝</div>
+    <div class="tbtn small" id="tb-reload">R</div>
+    <div class="tbtn small" id="tb-zoom">🔍</div>
+    <div class="tbtn small" id="tb-pause">⏸</div>
+    <div class="tbtn small" id="tb-score">≡</div>
+  </div>
+  <div id="rotate-hint"><div>📱↺<br>請將手機轉為橫向<br><span>ROTATE TO LANDSCAPE</span></div></div>
 
   <!-- Menu -->
   <div id="menu" class="screen">

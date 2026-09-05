@@ -351,3 +351,93 @@ h2.subtitle {
 
 #end-stats { margin: 24px 0 10px; font-size: 17px; line-height: 2; letter-spacing: 0.12em; color: #b9c0e4; }
 #end-stats b { color: var(--amber); font-size: 21px; }
+
+/* ── Touch controls ── */
+#touch-ui { position: fixed; inset: 0; z-index: 15; pointer-events: none; touch-action: none; }
+#game { touch-action: none; }
+
+#stick-base {
+  position: fixed;
+  width: 120px; height: 120px;
+  border: 2px solid rgba(61,232,255,0.4);
+  border-radius: 50%;
+  background: rgba(61,232,255,0.06);
+}
+#stick-nub {
+  position: absolute; left: 35px; top: 35px;
+  width: 50px; height: 50px;
+  border-radius: 50%;
+  background: rgba(61,232,255,0.35);
+  border: 1.5px solid rgba(61,232,255,0.8);
+  box-shadow: 0 0 16px rgba(61,232,255,0.5);
+}
+
+.tbtn {
+  position: fixed;
+  width: 62px; height: 62px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: rgba(12,15,32,0.55);
+  border: 1.5px solid rgba(255,255,255,0.3);
+  color: #dfe4ff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tbtn.on { background: rgba(61,232,255,0.3); border-color: var(--cyan); }
+.tbtn.lock { background: rgba(255,194,77,0.3); border-color: var(--amber); }
+.tbtn.big { width: 96px; height: 96px; font-size: 17px; border-color: rgba(255,61,160,0.6); background: rgba(255,61,160,0.14); }
+.tbtn.small { width: 46px; height: 46px; font-size: 15px; }
+
+#tb-fire   { right: calc(24px + env(safe-area-inset-right)); bottom: 86px; }
+#tb-jump   { right: calc(138px + env(safe-area-inset-right)); bottom: 60px; }
+#tb-dash   { right: calc(126px + env(safe-area-inset-right)); bottom: 148px; }
+#tb-slide  { right: calc(42px + env(safe-area-inset-right)); bottom: 200px; }
+#tb-grap   { right: calc(214px + env(safe-area-inset-right)); bottom: 44px; font-size: 22px; }
+#tb-reload { right: calc(36px + env(safe-area-inset-right)); bottom: 280px; }
+#tb-zoom   { right: calc(96px + env(safe-area-inset-right)); bottom: 252px; }
+#tb-pause  { left: calc(16px + env(safe-area-inset-left)); top: 14px; }
+#tb-score  { left: calc(72px + env(safe-area-inset-left)); top: 14px; }
+
+/* HUD repositioning + bigger tap targets on touch devices */
+body.touch #hud-bl { left: 20px; bottom: 150px; }
+body.touch #hp-num { font-size: 32px; }
+body.touch #hud-bl .bar { width: 160px; }
+body.touch #hud-br {
+  left: 50%; right: auto;
+  transform: translateX(-50%);
+  bottom: 6px;
+  text-align: center;
+}
+body.touch #hud-br #weapon-row { justify-content: center; margin-top: 3px; }
+body.touch #ammo-mag { font-size: 20px; }
+body.touch #ammo-sep { font-size: 14px; }
+body.touch #ammo-max { font-size: 13px; }
+body.touch #weapon-name { font-size: 10px; letter-spacing: 0.24em; }
+body.touch #hud-top { top: 10px; padding: 4px 14px; gap: 16px; }
+body.touch #killfeed { top: 52px; right: 16px; font-size: 12px; }
+.wpip { pointer-events: auto; cursor: pointer; }
+body.touch .wpip { width: 40px; height: 34px; font-size: 17px; }
+body.touch #combo-label { display: none; }
+
+/* rotate hint: touch devices in portrait only */
+#rotate-hint {
+  display: none;
+  position: fixed; inset: 0;
+  z-index: 60;
+  background: rgba(4,5,14,0.94);
+  align-items: center; justify-content: center;
+  text-align: center;
+  font-size: 24px;
+  line-height: 1.8;
+  letter-spacing: 0.1em;
+  color: var(--cyan);
+}
+#rotate-hint span { font-size: 13px; color: #8d94c0; letter-spacing: 0.3em; }
+@media (orientation: portrait) {
+  body.touch #rotate-hint { display: flex; }
+}

@@ -205,14 +205,15 @@ class SWAudio {
     }
   }
 
-  trumpetShot() { // shotgun: bright trumpet triad stab — "TA-DA" with punch
+  trumpetShot() { // 小號: 亮三和弦重音 — 舌吐起音(TA) + 銅管wah
     if (!this.enabled) return;
     const t = this.ctx.currentTime;
+    this._blastNoise(t, 0.018, 5000, 0.06); // tongue attack "T"
     // E minor triad, trumpet register
     this._brass(659.25, t, 0.34, 0.11, { bright: 6, rip: 0.72 });
     this._brass(493.88, t, 0.34, 0.09, { bright: 6, rip: 0.72 });
-    this._brass(392.0, t + 0.015, 0.32, 0.08, { bright: 6, rip: 0.72 });
-    this._blastNoise(t, 0.08, 1600, 0.1); // breath chiff
+    this._brass(392.0, t + 0.012, 0.32, 0.08, { bright: 6, rip: 0.72 });
+    this._blastNoise(t, 0.07, 1600, 0.08); // breath chiff
     this.duck(0.5, 0.25);
   }
 
@@ -318,23 +319,28 @@ class SWAudio {
     src.start(t);
   }
 
-  accordionShot() { // gatling: short reedy detuned-square chugs, bellows breath
+  accordionShot() { // 手風琴: musette triple-reed chugs — 微失諧三簧片 + 根音/五度
     if (!this.enabled) return;
     const t = this.ctx.currentTime;
-    const f = this.quantize(200 + Math.random() * 260);
-    for (const det of [1, 1.008]) {
-      const o = this.ctx.createOscillator();
-      o.type = 'square';
-      o.frequency.value = f * det;
-      const flt = this.ctx.createBiquadFilter();
-      flt.type = 'bandpass'; flt.frequency.value = f * 3.4; flt.Q.value = 1.4;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(0.05, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-      o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
-      o.start(t); o.stop(t + 0.09);
+    const root = this.quantize(200 + Math.random() * 240);
+    for (const [mult, vol] of [[1, 0.032], [1.5, 0.02]]) { // root + fifth
+      for (const det of [0.991, 1, 1.01]) {                 // wet musette tuning
+        const o = this.ctx.createOscillator();
+        o.type = 'sawtooth';
+        const f = root * mult * det;
+        o.frequency.setValueAtTime(f, t);
+        o.frequency.exponentialRampToValueAtTime(f * 0.975, t + 0.1); // bellows droop
+        const flt = this.ctx.createBiquadFilter();
+        flt.type = 'bandpass'; flt.frequency.value = root * mult * 2.6; flt.Q.value = 1.1;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
+        o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
+        o.start(t); o.stop(t + 0.12);
+      }
     }
-    this._blastNoise(t, 0.03, 3000, 0.03);
+    this._blastNoise(t, 0.025, 1800, 0.02); // bellows puff
   }
 
   bassDrumShot() { // 大鼓: cavernous boom + mallet thud
@@ -353,7 +359,7 @@ class SWAudio {
     this.duck(0.35, 0.4);
   }
 
-  violinShot() { // bow slash: rising string swipe with bite
+  violinShot() { // 小提琴: 弓弦上滑 — 鋸齒波+琴橋共振+顫音+弓毛擦弦聲
     if (!this.enabled) return;
     const t = this.ctx.currentTime;
     for (const det of [1, 1.004]) {
@@ -361,31 +367,51 @@ class SWAudio {
       o.type = 'sawtooth';
       o.frequency.setValueAtTime(587.33 * det, t);
       o.frequency.exponentialRampToValueAtTime(987.77 * det, t + 0.16);
+      // vibrato — the string-player's left hand
+      const lfo = this.ctx.createOscillator();
+      lfo.frequency.value = 6.2;
+      const lg = this.ctx.createGain();
+      lg.gain.value = 9;
+      lfo.connect(lg); lg.connect(o.frequency);
+      lfo.start(t); lfo.stop(t + 0.3);
       const flt = this.ctx.createBiquadFilter();
-      flt.type = 'bandpass'; flt.frequency.value = 2200; flt.Q.value = 2;
+      flt.type = 'bandpass'; flt.frequency.value = 2600; flt.Q.value = 1.6; // bridge resonance
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.12, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      g.gain.exponentialRampToValueAtTime(0.11, t + 0.025);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
       o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
-      o.start(t); o.stop(t + 0.25);
+      o.start(t); o.stop(t + 0.27);
     }
-    this._blastNoise(t, 0.05, 5000, 0.04);
+    // bow-hair scrape
+    const src = this.ctx.createBufferSource();
+    src.buffer = this._noiseBuf(0.14);
+    const bf = this.ctx.createBiquadFilter();
+    bf.type = 'bandpass'; bf.frequency.value = 3600; bf.Q.value = 0.8;
+    const bg = this.ctx.createGain();
+    bg.gain.setValueAtTime(0.045, t);
+    bg.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    src.connect(bf); bf.connect(bg); bg.connect(this.sfxBus);
+    src.start(t);
   }
 
-  trianglePing() { // 三角鐵: the iconic crystalline TING
+  trianglePing() { // 三角鐵: 金屬非諧泛音 + 微差拍閃爍 — 真正的 TING
     if (!this.enabled) return;
     const t = this.ctx.currentTime;
-    for (const [f, v, dur] of [[2093, 0.1, 0.9], [3136, 0.05, 0.6], [5274, 0.025, 0.35]]) {
+    // inharmonic metal partials (not integer multiples — that's the metallic shimmer)
+    const base = 1740;
+    for (const [ratio, v, dur] of [[1, 0.085, 1.3], [1.0045, 0.06, 1.2], [2.72, 0.045, 0.8], [5.42, 0.028, 0.5], [8.93, 0.014, 0.3]]) {
       const o = this.ctx.createOscillator();
       o.type = 'sine';
-      o.frequency.value = f;
+      o.frequency.value = base * ratio;
       const g = this.ctx.createGain();
-      g.gain.setValueAtTime(v, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(v, t + 0.004); // instant strike
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       o.connect(g); g.connect(this.sfxBus);
       o.start(t); o.stop(t + dur + 0.05);
     }
+    this._blastNoise(t, 0.012, 9000, 0.03); // beater click
   }
 
   maracasShake() { // two crisp shaker hits

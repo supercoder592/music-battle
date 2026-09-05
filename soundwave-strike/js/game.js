@@ -5,10 +5,15 @@ const $ = id => document.getElementById(id);
 
 class Game {
   constructor() {
+    // touch device? (drives control scheme + perf budget, not visual style)
+    this.isTouch = ('ontouchstart' in window) || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    if (this.isTouch) document.body.classList.add('touch');
+    WORLD.MOBILE = this.isTouch;
+
     // renderer
-    this.renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: !this.isTouch });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.isTouch ? 1.4 : 1.75));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputEncoding = THREE.sRGBEncoding;
@@ -78,6 +83,7 @@ class Game {
 
     this.bindInput();
     this.bindMenu();
+    if (this.isTouch) this.bindTouch();
     this.initNet();
 
     window.addEventListener('resize', () => {
@@ -118,6 +124,7 @@ class Game {
   }
 
   tryLock() {
+    if (this.isTouch) { this.lookFallback = true; return; } // touch devices never lock
     const c = this.renderer.domElement;
     if (this.lookFallback || document.pointerLockElement === c) return;
     try {
@@ -138,8 +145,99 @@ class Game {
   enableFallback() {
     if (this.lookFallback) return;
     this.lookFallback = true;
+    if (this.isTouch) return; // native on touch — no hint, keep cursor
     this.renderer.domElement.style.cursor = 'none';
     this.centerMsg('FREE-LOOK MODE — MOVE MOUSE TO AIM', 2.2);
+  }
+
+  /* ── touch控制: 左半虛擬搖桿 / 右半滑動視角 / 實體按鍵 ── */
+  bindTouch() {
+    this.lookFallback = true;
+    this.touchMove = { x: 0, y: 0 };
+    this.touchZoom = false;
+    const canvas = this.renderer.domElement;
+    const stickBase = $('stick-base'), nub = $('stick-nub');
+    let moveId = null, lookId = null, baseX = 0, baseY = 0, lastLX = 0, lastLY = 0;
+
+    canvas.addEventListener('touchstart', e => {
+      if (this.state === 'menu' || this.state === 'end' || this.state === 'paused') return;
+      e.preventDefault();
+      AUDIO.resume();
+      for (const t of e.changedTouches) {
+        if (t.clientX < window.innerWidth * 0.42 && moveId === null) {
+          moveId = t.identifier;
+          baseX = t.clientX; baseY = t.clientY;
+          stickBase.classList.remove('hidden');
+          stickBase.style.left = (baseX - 60) + 'px';
+          stickBase.style.top = (baseY - 60) + 'px';
+          nub.style.transform = 'translate(0px,0px)';
+        } else if (lookId === null) {
+          lookId = t.identifier;
+          lastLX = t.clientX; lastLY = t.clientY;
+        }
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+      if (moveId === null && lookId === null) return;
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        if (t.identifier === moveId) {
+          let dx = t.clientX - baseX, dy = t.clientY - baseY;
+          const len = Math.hypot(dx, dy), max = 55;
+          if (len > max) { dx *= max / len; dy *= max / len; }
+          nub.style.transform = `translate(${dx}px,${dy}px)`;
+          this.touchMove.x = dx / max;
+          this.touchMove.y = dy / max;
+        } else if (t.identifier === lookId) {
+          const sens = 0.0044 * (this.zoomed ? 0.45 : 1);
+          this.yaw -= (t.clientX - lastLX) * sens;
+          this.pitch -= (t.clientY - lastLY) * sens;
+          this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
+          lastLX = t.clientX; lastLY = t.clientY;
+        }
+      }
+    }, { passive: false });
+
+    const endTouch = e => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === moveId) {
+          moveId = null;
+          this.touchMove.x = this.touchMove.y = 0;
+          stickBase.classList.add('hidden');
+        }
+        if (t.identifier === lookId) lookId = null;
+      }
+    };
+    canvas.addEventListener('touchend', endTouch);
+    canvas.addEventListener('touchcancel', endTouch);
+
+    const bindBtn = (id, down, up) => {
+      const el = $(id);
+      el.addEventListener('touchstart', e => {
+        e.preventDefault(); e.stopPropagation();
+        AUDIO.resume();
+        el.classList.add('on');
+        down();
+      }, { passive: false });
+      el.addEventListener('touchend', e => {
+        e.preventDefault();
+        el.classList.remove('on');
+        if (up) up();
+      }, { passive: false });
+    };
+    bindBtn('tb-fire', () => { this.input.fire = true; this.tryFire(); }, () => { this.input.fire = false; });
+    bindBtn('tb-jump', () => this.tryJump());
+    bindBtn('tb-dash', () => this.tryDash());
+    bindBtn('tb-slide', () => this.trySlide());
+    bindBtn('tb-grap', () => this.tryGrapple());
+    bindBtn('tb-reload', () => this.tryReload());
+    bindBtn('tb-zoom', () => {
+      this.touchZoom = !this.touchZoom;
+      $('tb-zoom').classList.toggle('lock', this.touchZoom);
+    });
+    bindBtn('tb-pause', () => { if (this.state === 'playing') this.pause(); });
+    bindBtn('tb-score', () => $('scoreboard').classList.toggle('hidden'));
   }
 
   bindInput() {
@@ -389,6 +487,7 @@ class Game {
     $('matchend').classList.add('hidden');
     $('respawn-msg').classList.add('hidden');
     $('hud').classList.remove('hidden');
+    if (this.isTouch) $('touch-ui').classList.remove('hidden');
     const koth = this.mapId === 'hall' && mode !== 'training';
     $('match-goal').textContent = mode === 'training' ? 'SOUNDCHECK'
       : koth ? 'HOLD PODIUM 0/120s'
@@ -421,6 +520,7 @@ class Game {
     $('pause').classList.add('hidden');
     $('matchend').classList.add('hidden');
     $('hud').classList.add('hidden');
+    $('touch-ui').classList.add('hidden');
     $('menu').classList.remove('hidden');
     if (NET.available) NET.presence({ st: 'lobby', n: this.callsign, c: this.myColorIdx });
   }
@@ -429,6 +529,7 @@ class Game {
     this.state = 'end';
     document.exitPointerLock && document.exitPointerLock();
     $('hud').classList.add('hidden');
+    $('touch-ui').classList.add('hidden');
     $('end-title').textContent = won ? 'HEADLINER' : 'OPENING ACT';
     $('end-kicker').textContent = reason;
     const acc = this.deaths === 0 ? this.kills : (this.kills / Math.max(1, this.deaths)).toFixed(2);
@@ -660,6 +761,9 @@ class Game {
     this.viewModels.forEach((vm, i) => vm.visible = i === idx);
     this.wstate[idx].cd = Math.max(this.wstate[idx].cd, 0.25);
     this.zoomed = false;
+    this.touchZoom = false;
+    const zb = $('tb-zoom');
+    if (zb) zb.classList.remove('lock');
     this.updateHud();
   }
 
@@ -707,9 +811,10 @@ class Game {
     if (k['s']) f -= 1;
     if (k['a']) s -= 1;
     if (k['d']) s += 1;
+    if (this.touchMove) { f -= this.touchMove.y; s += this.touchMove.x; } // analog stick
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     const dir = new THREE.Vector3(-sin * f + cos * s, 0, -cos * f - sin * s);
-    if (dir.lengthSq() > 0) dir.normalize();
+    if (dir.lengthSq() > 1) dir.normalize();
     return dir;
   }
 
@@ -959,6 +1064,7 @@ class Game {
       const d = document.createElement('div');
       d.className = 'wpip' + (i === this.weaponIdx ? ' sel' : '');
       d.textContent = w.icon;
+      d.addEventListener('pointerdown', e => { e.stopPropagation(); this.switchWeapon(i); });
       row.appendChild(d);
     });
   }
@@ -1074,7 +1180,7 @@ class Game {
 
     // zoom fov
     const w = WEAPONS[this.weaponIdx];
-    const wantZoom = !!(w.zoom && this.input.aim && this.state === 'playing');
+    const wantZoom = !!(w.zoom && (this.input.aim || this.touchZoom) && this.state === 'playing');
     if (wantZoom !== this.zoomed) this.zoomed = wantZoom;
     const targetFov = this.zoomed ? 30 : 75;
     if (Math.abs(this.camera.fov - targetFov) > 0.5) {

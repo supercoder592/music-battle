@@ -386,7 +386,7 @@ WORLD._buildMixer = function (scene) {
   const moon = new THREE.DirectionalLight(0x8fa8de, 0.42);
   moon.position.set(-40, 70, -25);
   moon.castShadow = true;
-  moon.shadow.mapSize.set(2048, 2048);
+  moon.shadow.mapSize.set(WORLD.MOBILE ? 1024 : 2048, WORLD.MOBILE ? 1024 : 2048);
   moon.shadow.camera.left = -70; moon.shadow.camera.right = 70;
   moon.shadow.camera.top = 70; moon.shadow.camera.bottom = -70;
   moon.shadow.camera.far = 220;
@@ -554,8 +554,9 @@ WORLD._buildMixer = function (scene) {
 
   // skyline
   const rng = (a, b) => a + Math.random() * (b - a);
-  for (let i = 0; i < 26; i++) {
-    const ang = (i / 26) * Math.PI * 2 + rng(-0.06, 0.06);
+  const nBldg = WORLD.MOBILE ? 16 : 26;
+  for (let i = 0; i < nBldg; i++) {
+    const ang = (i / nBldg) * Math.PI * 2 + rng(-0.06, 0.06);
     const dist = rng(96, 170);
     const bw = rng(10, 26), bh = rng(24, 78), bd = rng(10, 22);
     const b = new THREE.Mesh(
@@ -607,7 +608,7 @@ WORLD._buildMixer = function (scene) {
   scene.add(eqGroup);
 
   // rain
-  const rainCount = 700;
+  const rainCount = WORLD.MOBILE ? 350 : 700;
   const rainGeo = new THREE.BufferGeometry();
   const rp = new Float32Array(rainCount * 6);
   const rainData = [];
@@ -688,7 +689,7 @@ WORLD._buildHall = function (scene) {
   const key = new THREE.DirectionalLight(0xffd9a0, 0.34);
   key.position.set(20, 60, 10);
   key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.mapSize.set(WORLD.MOBILE ? 1024 : 2048, WORLD.MOBILE ? 1024 : 2048);
   key.shadow.camera.left = -60; key.shadow.camera.right = 60;
   key.shadow.camera.top = 60; key.shadow.camera.bottom = -60;
   key.shadow.camera.far = 200;
