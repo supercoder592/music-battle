@@ -318,6 +318,122 @@ class SWAudio {
     src.start(t);
   }
 
+  accordionShot() { // gatling: short reedy detuned-square chugs, bellows breath
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+    const f = this.quantize(200 + Math.random() * 260);
+    for (const det of [1, 1.008]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = f * det;
+      const flt = this.ctx.createBiquadFilter();
+      flt.type = 'bandpass'; flt.frequency.value = f * 3.4; flt.Q.value = 1.4;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.05, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
+      o.start(t); o.stop(t + 0.09);
+    }
+    this._blastNoise(t, 0.03, 3000, 0.03);
+  }
+
+  bassDrumShot() { // 大鼓: cavernous boom + mallet thud
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(90, t);
+    o.frequency.exponentialRampToValueAtTime(32, t + 0.35);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.42, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    o.connect(g); g.connect(this.sfxBus);
+    o.start(t); o.stop(t + 0.55);
+    this._blastNoise(t, 0.12, 320, 0.2);
+    this.duck(0.35, 0.4);
+  }
+
+  violinShot() { // bow slash: rising string swipe with bite
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+    for (const det of [1, 1.004]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(587.33 * det, t);
+      o.frequency.exponentialRampToValueAtTime(987.77 * det, t + 0.16);
+      const flt = this.ctx.createBiquadFilter();
+      flt.type = 'bandpass'; flt.frequency.value = 2200; flt.Q.value = 2;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.12, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
+      o.start(t); o.stop(t + 0.25);
+    }
+    this._blastNoise(t, 0.05, 5000, 0.04);
+  }
+
+  trianglePing() { // 三角鐵: the iconic crystalline TING
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+    for (const [f, v, dur] of [[2093, 0.1, 0.9], [3136, 0.05, 0.6], [5274, 0.025, 0.35]]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(v, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(this.sfxBus);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+  }
+
+  maracasShake() { // two crisp shaker hits
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+    for (const dt of [0, 0.08]) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this._noiseBuf(0.06);
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'highpass'; f.frequency.value = 4200;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.16, t + dt);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.06);
+      src.connect(f); f.connect(g); g.connect(this.sfxBus);
+      src.start(t + dt);
+    }
+  }
+
+  hornCall() { // 號角勾索: bright open-fifth call + zip
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+    for (const f of [392, 587.33]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f * 0.85, t);
+      o.frequency.exponentialRampToValueAtTime(f, t + 0.05);
+      const flt = this.ctx.createBiquadFilter();
+      flt.type = 'lowpass'; flt.frequency.value = 2200; flt.Q.value = 1.5;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.09, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      o.connect(flt); flt.connect(g); g.connect(this.sfxBus);
+      o.start(t); o.stop(t + 0.32);
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = this._noiseBuf(0.25);
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.setValueAtTime(800, t);
+    f.frequency.exponentialRampToValueAtTime(3600, t + 0.24);
+    f.Q.value = 3;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    src.connect(f); f.connect(g); g.connect(this.sfxBus);
+    src.start(t);
+  }
+
   hitmark() {
     if (!this.enabled) return;
     const t = this.ctx.currentTime;

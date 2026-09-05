@@ -15,16 +15,14 @@ class Game {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.92;
 
-    this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
-    this.scene.add(this.camera);
     // soft fill so the view-model brass reads at night
     const vmFill = new THREE.PointLight(0xfff0dc, 0.65, 2.2, 1.5);
     vmFill.position.set(0.25, 0.05, -0.25);
     this.camera.add(vmFill);
 
-    this.world = WORLD.build(this.scene);
-    VFX.init(this.scene);
+    this.mapId = 'mixer';
+    this.setupScene('mixer');
 
     // player state
     this.pos = new THREE.Vector3(0, 0, 30);   // feet
@@ -58,6 +56,12 @@ class Game {
     this.zoomed = false;
     this.spread = 0;
 
+    // horn grapple (機動工具)
+    this.grapple = null;
+    this.grapCd = 0;
+    this.ctl = 0; // podium control seconds (hall KOTH)
+    this.shakeAmp = 0; this.shakeT = 0; this.shakeDur = 1;
+
     // match
     this.state = 'menu';   // menu | playing | paused | dead | end
     this.mode = 'bots';
@@ -83,6 +87,25 @@ class Game {
     });
 
     requestAnimationFrame(ts => this.frame(ts));
+  }
+
+  /* build (or rebuild) the scene for a map */
+  setupScene(mapId) {
+    this.mapId = mapId;
+    this.scene = new THREE.Scene();
+    this.scene.add(this.camera);
+    this.world = WORLD.build(this.scene, mapId);
+    VFX.init(this.scene);
+    // grapple rope line (hidden until used)
+    const ropeGeo = new THREE.BufferGeometry();
+    ropeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+    this.ropeLine = new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.9 }));
+    this.ropeLine.visible = false;
+    this.ropeLine.frustumCulled = false;
+    this.scene.add(this.ropeLine);
+    // remote avatars belong to the old scene — rebuild lazily from presence
+    for (const av of this.remotes ? this.remotes.values() : []) av.dispose(av.model.parent || this.scene);
+    if (this.remotes) this.remotes.clear();
   }
 
   /* ── input ──
@@ -162,7 +185,8 @@ class Game {
       if (k === 'shift') this.tryDash();
       if (k === 'c' || k === 'control') this.trySlide();
       if (k === 'r') this.tryReload();
-      if (k >= '1' && k <= '4') this.switchWeapon(+k - 1);
+      if (k === 'e') this.tryGrapple();
+      if (k >= '1' && k <= '9') this.switchWeapon(+k - 1);
     });
     document.addEventListener('keyup', e => {
       const k = e.key.toLowerCase();
@@ -177,6 +201,13 @@ class Game {
     $('btn-bots').addEventListener('click', () => this.startMatch('bots'));
     $('btn-online').addEventListener('click', () => this.startMatch('online'));
     $('btn-training').addEventListener('click', () => this.startMatch('training'));
+    this.selectedMap = 'mixer';
+    document.querySelectorAll('.map-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        this.selectedMap = chip.dataset.map;
+        document.querySelectorAll('.map-chip').forEach(c => c.classList.toggle('sel', c === chip));
+      });
+    });
     $('btn-resume').addEventListener('click', () => this.resume());
     $('btn-quit').addEventListener('click', () => this.toMenu());
     $('btn-again').addEventListener('click', () => this.startMatch(this.mode));
@@ -219,7 +250,8 @@ class Game {
     for (const p of [...change.joined, ...change.updated]) {
       if (p.isMe || p.kind !== 'viewer') continue;
       const pr = p.presence || {};
-      if (pr.st === 'lobby') {
+      if (pr.st === 'lobby' || (pr.mp && pr.mp !== this.mapId)) {
+        // gone to the lobby, or playing the other map — don't render them here
         const av = this.remotes.get(p.peer);
         if (av) { av.dispose(this.scene); this.remotes.delete(p.peer); }
         continue;
@@ -247,12 +279,14 @@ class Game {
   onRemoteFire(m) {
     const d = m.data || {};
     if (!Array.isArray(d.o) || !Array.isArray(d.e)) return;
+    if (d.mp && d.mp !== this.mapId) return; // other map's gunfire
     const from = new THREE.Vector3(...d.o.map(Number));
     const to = new THREE.Vector3(...d.e.map(Number));
-    const w = WEAPONS[(d.w | 0) % WEAPONS.length];
+    const wi = (d.w | 0) % WEAPONS.length;
+    const w = WEAPONS[wi];
     VFX.tracer(from, to, w.tracerColor);
     VFX.flash(from, w.tracerColor, 1.1, 5);
-    if (d.w === 3) VFX.spawnRocket(from, to.clone().sub(from).normalize(), m.peer);
+    if (w.mode === 'projectile') VFX.spawnProjectile(wi, from, to.clone().sub(from).normalize(), m.peer);
     const dist = from.distanceTo(new THREE.Vector3(this.pos.x, this.pos.y + this.eyeH, this.pos.z));
     if (dist < 80) w.sfx(); // their instrument, heard in your key
   }
@@ -289,7 +323,7 @@ class Game {
   pushPresence(force) {
     if (this.mode !== 'online' || !NET.available) return;
     NET.presence({
-      n: this.callsign, c: this.myColorIdx,
+      n: this.callsign, c: this.myColorIdx, mp: this.mapId, ctl: Math.floor(this.ctl),
       st: this.alive ? 'game' : 'dead',
       hp: Math.round(this.hp), k: this.kills, d: this.deaths, w: this.weaponIdx,
       x: +this.pos.x.toFixed(2), y: +this.pos.y.toFixed(2), z: +this.pos.z.toFixed(2),
@@ -300,8 +334,13 @@ class Game {
   /* ── match flow ── */
   startMatch(mode) {
     AUDIO.init();
+    const wantMap = this.selectedMap || 'mixer';
+    if (wantMap !== this.mapId) this.setupScene(wantMap);
     this.mode = mode;
     this.state = 'playing';
+    this.ctl = 0;
+    this.grapple = null;
+    this.grapCd = 0;
     this.kills = 0; this.deaths = 0;
     this.hp = 100;
     this.alive = true;
@@ -316,7 +355,15 @@ class Game {
       }
     } else if (mode === 'training') {
       // soundcheck range: harmless dummies at varied ranges & heights
-      const posts = [
+      const posts = this.mapId === 'hall' ? [
+        { x: 0, y: 0.6, z: 0 },       // the golden podium
+        { x: -11.4, y: 0, z: 0 },     // bridge mouths
+        { x: 11.4, y: 0, z: 0 },
+        { x: 0, y: 0, z: 11.4 },
+        { x: 24, y: 0, z: -14 },      // outer ring
+        { x: -26, y: 0, z: 16 },
+        { x: 0, y: 1.2, z: -36 },     // on stage
+      ] : [
         { x: 0, y: 2.4, z: 0 },       // center platform
         { x: -12, y: 0, z: -14 },     // mid lane
         { x: 14, y: 0, z: 10 },       // mid lane
@@ -342,7 +389,10 @@ class Game {
     $('matchend').classList.add('hidden');
     $('respawn-msg').classList.add('hidden');
     $('hud').classList.remove('hidden');
-    $('match-goal').textContent = mode === 'bots' ? `FIRST TO ${this.killGoal}` : (mode === 'training' ? 'SOUNDCHECK' : 'ONLINE JAM');
+    const koth = this.mapId === 'hall' && mode !== 'training';
+    $('match-goal').textContent = mode === 'training' ? 'SOUNDCHECK'
+      : koth ? 'HOLD PODIUM 0/120s'
+      : mode === 'bots' ? `FIRST TO ${this.killGoal}` : 'ONLINE JAM';
     this.buildWeaponRow();
     this.switchWeapon(0);
     this.updateHud();
@@ -416,7 +466,8 @@ class Game {
     const prevY = pos.y;
     pos.y += vel.y * dt;
     let grounded = false;
-    if (pos.y <= 0) { pos.y = 0; vel.y = 0; grounded = true; }
+    const gy = this.world.groundY(pos.x, pos.z); // 0 on streets; 0.6 podium; -30 in the precipice
+    if (pos.y <= gy && prevY >= gy - 0.65 && vel.y <= 0) { pos.y = gy; vel.y = 0; grounded = true; }
     for (const c of cols) {
       if (pos.x + r > c.minX && pos.x - r < c.maxX && pos.z + r > c.minZ && pos.z - r < c.maxZ) {
         if (vel.y <= 0 && prevY >= c.maxY - 0.05 && pos.y < c.maxY) {
@@ -426,9 +477,15 @@ class Game {
         }
       }
     }
-    // arena clamp
-    pos.x = Math.max(-S + r, Math.min(S - r, pos.x));
-    pos.z = Math.max(-S + r, Math.min(S - r, pos.z));
+    // arena clamp (square yard or circular hall)
+    if (this.world.circular) {
+      const rr = Math.hypot(pos.x, pos.z);
+      const maxR = this.world.radius - r - 0.4;
+      if (rr > maxR) { pos.x *= maxR / rr; pos.z *= maxR / rr; }
+    } else {
+      pos.x = Math.max(-S + r, Math.min(S - r, pos.x));
+      pos.z = Math.max(-S + r, Math.min(S - r, pos.z));
+    }
     return grounded;
   }
 
@@ -531,7 +588,7 @@ class Game {
     if (target.hp <= 0 && target.alive) {
       target.die();
       const aName = attacker === this ? this.callsign : attacker.name;
-      const icon = attacker === this ? WEAPONS[this.weaponIdx].icon : '🎵';
+      const icon = attacker === this ? WEAPONS[this.weaponIdx].icon : WEAPONS[attacker.w != null ? attacker.w : 1].icon;
       this.killfeed(aName, target.name, icon, attacker === this);
       if (attacker === this) {
         this.kills++;
@@ -543,6 +600,10 @@ class Game {
         if (this.mode === 'bots' && attacker.kills >= this.killGoal) this.endMatch(false, `${attacker.name.toUpperCase()} STOLE THE SHOW`);
       }
     }
+  }
+
+  shake(amp, dur) {
+    if (amp >= this.shakeAmp) { this.shakeAmp = amp; this.shakeDur = dur; this.shakeT = dur; }
   }
 
   takeDamage(dmg, attacker) {
@@ -652,12 +713,26 @@ class Game {
     return dir;
   }
 
+  /* 號角勾索 — raycast a hook point, reel in, keep the momentum */
+  tryGrapple() {
+    if (this.state !== 'playing' || !this.alive || this.grapCd > 0) return;
+    const dir = this.aimDir(0);
+    const origin = this.eyePos();
+    const rc = new THREE.Raycaster(origin, dir, 0.5, 48);
+    const hits = rc.intersectObjects(this.world.solids, false);
+    if (!hits.length) { this.grapCd = 0.5; return; }
+    this.grapple = { point: hits[0].point.clone(), t: 1.5 };
+    this.grapCd = 5;
+    AUDIO.hornCall();
+    VFX.spark(hits[0].point, 0xffd27a, 6, 4);
+  }
+
   tryFire() {
     if (this.state !== 'playing' || !this.alive) return;
     const w = WEAPONS[this.weaponIdx], st = this.wstate[this.weaponIdx];
     if (st.cd > 0 || st.reloadT > 0) return;
     if (st.mag <= 0) { this.tryReload(); return; }
-    st.mag--;
+    if (isFinite(st.mag)) st.mag--;
     st.cd = w.rate;
     this.spawnProt = 0;
     this.vmKick = 1;
@@ -667,12 +742,33 @@ class Game {
     const origin = this.eyePos();
     const moveSpread = this.zoomed ? 0 : Math.min(0.03, new THREE.Vector2(this.vel.x, this.vel.z).length() * 0.0022);
 
+    if (w.mode === 'melee') {
+      // maracas: close-range arc swipe
+      const aim = this.aimDir(0);
+      let hitAny = false;
+      const targets = [...this.allCombatants().filter(t => t !== this), ...this.remotes.values()];
+      for (const t of targets) {
+        if (!t.alive) continue;
+        const to = t.eyePos().clone().sub(origin);
+        const d = to.length();
+        if (d > w.range + 0.5) continue;
+        to.normalize();
+        if (to.dot(aim) < 0.55) continue;
+        hitAny = true;
+        this.applyDamage(t, w.dmg, this, t.eyePos());
+        if (t instanceof Bot) { t.vel.x += to.x * 10; t.vel.z += to.z * 10; t.vel.y += 3; }
+      }
+      if (hitAny) { this.shake(4, 0.15); VFX.ring(origin.clone().addScaledVector(aim, 1.6), 0xffb35e, 3); }
+      this.updateHud();
+      return;
+    }
+
     if (w.mode === 'projectile') {
       const dir = this.aimDir(0);
-      VFX.spawnRocket(origin.clone().addScaledVector(dir, 0.8).add(new THREE.Vector3(0, -0.15, 0)), dir, 'me');
+      VFX.spawnProjectile(this.weaponIdx, origin.clone().addScaledVector(dir, 0.8).add(new THREE.Vector3(0, -0.15, 0)), dir, 'me');
       if (this.mode === 'online') {
         const end = origin.clone().addScaledVector(dir, 2);
-        NET.emit('fire', { o: this.v3(origin), e: this.v3(end), w: 3 });
+        NET.emit('fire', { o: this.v3(origin), e: this.v3(end), w: this.weaponIdx, mp: this.mapId });
       }
     } else {
       for (let p = 0; p < w.pellets; p++) {
@@ -691,7 +787,7 @@ class Game {
           }
         }
         if (this.mode === 'online' && p === 0) {
-          NET.emit('fire', { o: this.v3(mzl), e: this.v3(end), w: this.weaponIdx });
+          NET.emit('fire', { o: this.v3(mzl), e: this.v3(end), w: this.weaponIdx, mp: this.mapId });
         }
       }
       VFX.flash(this.muzzleWorld(), w.tracerColor, 1.6, 6);
@@ -723,46 +819,118 @@ class Game {
   updateRockets(dt) {
     for (let i = VFX.rockets.length - 1; i >= 0; i--) {
       const r = VFX.rockets[i];
+      const w = WEAPONS[r.w != null ? r.w : 4];
       r.life -= dt;
-      const step = r.vel.clone().multiplyScalar(dt);
-      r.mesh.position.add(step);
+      r.mesh.position.addScaledVector(r.vel, dt);
+      if (r.mesh.userData.spinRing) r.mesh.userData.spinRing.rotation.z += dt * 18;
       const p = r.mesh.position;
-      let boom = r.life <= 0 || p.y <= 0.05;
-      if (!boom) {
+      let expired = r.life <= 0;
+      const gyp = this.world.groundY(p.x, p.z);
+      let touchWorld = gyp > -5 && p.y <= gyp + 0.05;
+      if (!touchWorld) {
         for (const c of this.world.colliders) {
-          if (p.x > c.minX && p.x < c.maxX && p.y > c.minY && p.y < c.maxY && p.z > c.minZ && p.z < c.maxZ) { boom = true; break; }
+          if (p.x > c.minX && p.x < c.maxX && p.y > c.minY && p.y < c.maxY && p.z > c.minZ && p.z < c.maxZ) { touchWorld = true; break; }
+        }
+        // arena boundary
+        if (!touchWorld) {
+          if (this.world.circular) { if (Math.hypot(p.x, p.z) > this.world.radius) touchWorld = true; }
+          else if (Math.abs(p.x) > this.world.bounds || Math.abs(p.z) > this.world.bounds) touchWorld = true;
         }
       }
-      if (!boom) {
-        for (const t of this.allCombatants()) {
-          if ((r.ownerId === 'me' && t === this) || t.id === r.ownerId) continue;
-          const ep = t === this ? this.eyePos() : t.eyePos();
-          if (p.distanceTo(ep) < 1.2 || p.distanceTo(t === this ? this.pos : t.pos) < 1.2) { boom = true; break; }
+
+      if (r.kind === 'blade') {
+        // violin air cutter: reflect off world geometry, slice through actors
+        if (touchWorld) {
+          if (r.bounces > 0) {
+            r.bounces--;
+            this._reflectBlade(r, p);
+            VFX.spark(p.clone(), 0x9fe8ff, 5, 5);
+            AUDIO.violinChainTick ? AUDIO.violinChainTick() : AUDIO.hitmark();
+          } else expired = true;
         }
-        for (const rm of this.remotes.values()) {
-          if (rm.id === r.ownerId || !rm.alive) continue;
-          if (p.distanceTo(rm.eyePos()) < 1.3) { boom = true; break; }
+        for (const t of [...this.allCombatants(), ...this.remotes.values()]) {
+          if (t.id === r.ownerId || (r.ownerId === 'me' && t === this) || !t.alive || r.hitSet.has(t)) continue;
+          const ep = t === this ? this.eyePos() : t.eyePos();
+          if (p.distanceTo(ep) < 1.15 || p.distanceTo(t === this ? this.pos : t.pos) < 1.15) {
+            r.hitSet.add(t);
+            if (r.ownerId === 'me') this.applyDamage(t, w.dmg, this, ep);
+            else if (t === this) this.takeDamage(w.dmg, this.bots.find(b => b.id === r.ownerId) || { name: 'AIRCUTTER' });
+            VFX.spark(ep.clone(), 0x9fe8ff, 8, 6);
+          }
+        }
+        if (expired || p.y < -6) {
+          this.scene.remove(r.mesh);
+          VFX.rockets.splice(i, 1);
+        }
+        continue;
+      }
+
+      // explosive projectiles (tuba rocket / bass-drum shock)
+      let boom = expired || touchWorld || p.y < -6;
+      if (!boom) {
+        for (const t of [...this.allCombatants(), ...this.remotes.values()]) {
+          if (t.id === r.ownerId || (r.ownerId === 'me' && t === this) || !t.alive) continue;
+          const ep = t === this ? this.eyePos() : t.eyePos();
+          if (p.distanceTo(ep) < 1.25 || p.distanceTo(t === this ? this.pos : t.pos) < 1.25) { boom = true; break; }
         }
       }
       if (boom) {
-        this.explode(p.clone(), r.ownerId);
+        this.explode(p.clone(), r.ownerId, r.w != null ? r.w : 4);
         this.scene.remove(r.mesh);
         VFX.rockets.splice(i, 1);
       }
     }
   }
 
-  explode(p, ownerId) {
+  _reflectBlade(r, p) {
+    // reflect off the nearest surface: axis walls, circle wall, or the AABB face we hit
+    if (this.world.circular) {
+      const rr = Math.hypot(p.x, p.z);
+      if (rr > this.world.radius - 0.5) {
+        const nx = -p.x / rr, nz = -p.z / rr;
+        const d = r.vel.x * nx + r.vel.z * nz;
+        r.vel.x -= 2 * d * nx; r.vel.z -= 2 * d * nz;
+        p.x = nx * -(this.world.radius - 0.6); p.z = nz * -(this.world.radius - 0.6);
+        return;
+      }
+    } else if (Math.abs(p.x) > this.world.bounds - 0.5) { r.vel.x *= -1; p.x = Math.sign(p.x) * (this.world.bounds - 0.6); return; }
+    else if (Math.abs(p.z) > this.world.bounds - 0.5) { r.vel.z *= -1; p.z = Math.sign(p.z) * (this.world.bounds - 0.6); return; }
+    const gy = this.world.groundY(p.x, p.z);
+    if (gy > -5 && p.y <= gy + 0.4) { r.vel.y = Math.abs(r.vel.y) || 2; p.y = gy + 0.45; return; }
+    // AABB face: reflect along the axis of least penetration
+    for (const c of this.world.colliders) {
+      if (p.x > c.minX && p.x < c.maxX && p.y > c.minY && p.y < c.maxY && p.z > c.minZ && p.z < c.maxZ) {
+        const dx = Math.min(p.x - c.minX, c.maxX - p.x);
+        const dz = Math.min(p.z - c.minZ, c.maxZ - p.z);
+        const dy = Math.min(p.y - c.minY, c.maxY - p.y);
+        if (dx <= dz && dx <= dy) { r.vel.x *= -1; p.x += Math.sign(r.vel.x) * (dx + 0.1); }
+        else if (dz <= dy) { r.vel.z *= -1; p.z += Math.sign(r.vel.z) * (dz + 0.1); }
+        else { r.vel.y *= -1; p.y += Math.sign(r.vel.y) * (dy + 0.1); }
+        return;
+      }
+    }
+    r.vel.multiplyScalar(-1);
+  }
+
+  explode(p, ownerId, wIdx = 4) {
     VFX.explosion(p);
     AUDIO.explosion();
-    const w = WEAPONS[3];
+    this.shake(wIdx === 5 ? 10 : 7, 0.35);
+    const w = WEAPONS[wIdx];
+    const kb = 16 * (w.kbMult || 1);
     const attacker = ownerId === 'me' ? this : (this.bots.find(b => b.id === ownerId) || this.remotes.get(ownerId) || null);
-    // damage bots + remote players (only if we own the rocket)
     if (ownerId === 'me') {
       for (const b of this.bots) {
         if (!b.alive) continue;
         const d = p.distanceTo(b.eyePos());
-        if (d < w.splash) this.applyDamage(b, w.dmg * Math.max(0.2, 1 - d / w.splash), this, b.eyePos());
+        if (d < w.splash) {
+          this.applyDamage(b, w.dmg * Math.max(0.2, 1 - d / w.splash), this, b.eyePos());
+          if (b.alive) { // 360° concussion — the bass drum's terrain-kill tool
+            const push = new THREE.Vector3().subVectors(b.pos, p).setY(0).normalize().multiplyScalar(kb * Math.max(0.3, 1 - d / w.splash));
+            b.vel.add(push);
+            b.vel.y += 4 * (w.kbMult || 1) * 0.4;
+          }
+        }
       }
       for (const rm of this.remotes.values()) {
         if (!rm.alive) continue;
@@ -770,13 +938,13 @@ class Game {
         if (d < w.splash) this.applyDamage(rm, w.dmg * Math.max(0.2, 1 - d / w.splash), this, rm.eyePos());
       }
     }
-    // self knockback + self damage (rocket jump!)
+    // knockback on self always (rocket/quake jumps), damage rules unchanged
     const dSelf = p.distanceTo(this.eyePos());
     if (dSelf < w.splash + 1) {
-      const push = new THREE.Vector3().subVectors(this.eyePos(), p).normalize().multiplyScalar(Math.max(0, 1 - dSelf / (w.splash + 1)) * 16);
+      const push = new THREE.Vector3().subVectors(this.eyePos(), p).normalize().multiplyScalar(Math.max(0, 1 - dSelf / (w.splash + 1)) * kb);
       this.vel.add(push);
       if (ownerId === 'me' && this.alive && dSelf < w.splash * 0.7) {
-        this.takeDamage(Math.round(20 * (1 - dSelf / w.splash)), { name: this.callsign });
+        this.takeDamage(Math.round((wIdx === 5 ? 10 : 20) * (1 - dSelf / w.splash)), { name: this.callsign });
       } else if (attacker && attacker !== this && this.alive && dSelf < w.splash && ownerId !== 'me' && !(attacker instanceof RemoteAvatar)) {
         this.takeDamage(Math.round(w.dmg * Math.max(0.2, 1 - dSelf / w.splash)), attacker);
       }
@@ -802,8 +970,8 @@ class Game {
     bar.classList.toggle('low', this.hp < 35);
     const w = WEAPONS[this.weaponIdx], st = this.wstate[this.weaponIdx];
     $('weapon-name').textContent = w.name;
-    $('ammo-mag').textContent = st.reloadT > 0 ? '––' : st.mag;
-    $('ammo-max').textContent = w.mag;
+    $('ammo-mag').textContent = !isFinite(w.mag) ? '∞' : (st.reloadT > 0 ? '––' : st.mag);
+    $('ammo-max').textContent = !isFinite(w.mag) ? '∞' : w.mag;
     $('match-score').textContent = this.kills;
     [...$('weapon-row').children].forEach((el, i) => el.classList.toggle('sel', i === this.weaponIdx));
   }
@@ -865,11 +1033,27 @@ class Game {
       $('beat-ring').classList.toggle('pulse', beat < 0.14 || beat > 0.86);
     }
 
-    // camera
+    // camera (with impact shake)
     const crouch = this.sliding > 0 ? 0.55 : 0;
     this.crouchLerp += (crouch - this.crouchLerp) * Math.min(1, dt * 10);
-    this.camera.position.set(this.pos.x, this.pos.y + this.eyeH - this.crouchLerp, this.pos.z);
+    if (this.shakeT > 0) this.shakeT -= dt; else this.shakeAmp = 0;
+    const shk = this.shakeAmp * Math.max(0, this.shakeT / this.shakeDur) * 0.04;
+    this.camera.position.set(
+      this.pos.x + (Math.random() - 0.5) * shk,
+      this.pos.y + this.eyeH - this.crouchLerp + (Math.random() - 0.5) * shk,
+      this.pos.z + (Math.random() - 0.5) * shk
+    );
     this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+
+    // grapple rope visual
+    if (this.grapple) {
+      const p = this.ropeLine.geometry.attributes.position.array;
+      const mzl = this.eyePos();
+      p[0] = mzl.x + Math.cos(this.yaw + 2.2) * 0.4; p[1] = mzl.y - 0.3; p[2] = mzl.z - Math.sin(this.yaw + 2.2) * 0.4;
+      p[3] = this.grapple.point.x; p[4] = this.grapple.point.y; p[5] = this.grapple.point.z;
+      this.ropeLine.geometry.attributes.position.needsUpdate = true;
+      this.ropeLine.visible = true;
+    } else this.ropeLine.visible = false;
 
     // view model animation
     const vm = this.viewModels[this.weaponIdx];
@@ -921,18 +1105,40 @@ class Game {
     }
 
     // match clock
+    const koth = this.mapId === 'hall' && this.mode !== 'training';
+    if (koth) $('match-goal').textContent = `HOLD PODIUM ${Math.floor(this.ctl)}/120s`;
     if (this.mode === 'bots') {
       this.matchTime -= dt;
       if (this.matchTime <= 0) {
-        const topBot = Math.max(0, ...this.bots.map(b => b.kills));
-        this.endMatch(this.kills >= topBot, 'CURFEW — SHOW OVER');
+        if (koth) {
+          const topBot = Math.max(0, ...this.bots.map(b => b.ctl || 0));
+          this.endMatch(this.ctl >= topBot, 'CURFEW — MOST PODIUM TIME WINS');
+        } else {
+          const topBot = Math.max(0, ...this.bots.map(b => b.kills));
+          this.endMatch(this.kills >= topBot, 'CURFEW — SHOW OVER');
+        }
         return;
       }
       const m = Math.max(0, this.matchTime);
       $('match-time').textContent = `${(m / 60) | 0}:${String((m % 60) | 0).padStart(2, '0')}`;
+      // a bot can win the podium too
+      if (koth) {
+        for (const b of this.bots) {
+          if ((b.ctl || 0) >= 120) { this.endMatch(false, `${b.name.toUpperCase()} CONDUCTED THE FINALE`); return; }
+        }
+      }
     } else {
       this.matchTime += dt;
       $('match-time').textContent = `${(this.matchTime / 60) | 0}:${String((this.matchTime % 60) | 0).padStart(2, '0')}`;
+      // online podium victory: anyone's presence hits 120s
+      if (koth && this.mode === 'online') {
+        for (const p of NET.peers()) {
+          if (!p.isMe && p.kind === 'viewer' && (p.presence || {}).ctl >= 120 && (p.presence || {}).mp === 'hall') {
+            this.endMatch(false, `${String((p.presence || {}).n || 'A RIVAL')} CONDUCTED THE FINALE`);
+            return;
+          }
+        }
+      }
     }
 
     // dead → respawn
@@ -967,9 +1173,41 @@ class Game {
         this.vel.x += (wish.x * speed - this.vel.x) * Math.min(1, dt * accel);
         this.vel.z += (wish.z * speed - this.vel.z) * Math.min(1, dt * accel);
       }
+      // horn grapple reel-in (momentum is kept on release — 動量繼承)
+      if (this.grapCd > 0) this.grapCd -= dt;
+      if (this.grapple) {
+        this.grapple.t -= dt;
+        const to = this.grapple.point.clone().sub(this.eyePos());
+        const d = to.length();
+        if (d < 2.4 || this.grapple.t <= 0) {
+          this.grapple = null;
+        } else {
+          to.normalize();
+          this.vel.addScaledVector(to, 70 * dt);
+          this.vel.y += 14 * dt; // fight gravity while reeling
+          const sp = this.vel.length();
+          if (sp > 30) this.vel.multiplyScalar(30 / sp);
+        }
+      }
+
       this.vel.y -= 26 * dt;
       this.grounded = this.moveWithCollisions(this.pos, this.vel, dt, 0.45, 1.8);
       this.checkJumpPad(this);
+
+      // the Soundwave Precipice claims the careless
+      if (this.pos.y < -5 && this.alive) {
+        this.grapple = null;
+        this.dieBy({ name: 'THE PRECIPICE' });
+        return;
+      }
+
+      // podium control (hall king-of-the-hill)
+      if (this.world.podium && this.mode !== 'training') {
+        if (Math.hypot(this.pos.x, this.pos.z) <= this.world.podium.r && this.pos.y > 0.3) {
+          this.ctl += dt;
+          if (this.ctl >= 120) { this.endMatch(true, 'THE PODIUM IS YOURS — 120s OF CONTROL'); return; }
+        }
+      }
 
       // auto fire
       if (this.input.fire && WEAPONS[this.weaponIdx].auto) this.tryFire();

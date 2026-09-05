@@ -14,9 +14,18 @@ guns, a rain-soaked night cargo yard under a neon skyline, and every shot
 quantized to the music. Open `soundwave-strike/index.html` (serve the folder
 over HTTP for module-free script loading, e.g. `python3 -m http.server`).
 
-- **Arsenal (per the proposal's mapping):** trumpet = shotgun, snare = SMG,
-  trombone = sniper (RMB zoom), tuba = rocket launcher with splash knockback
-  (rocket jumps work).
+- **The proposal's complete arsenal (10 instruments):** trumpet shotgun,
+  snare SMG, accordion gatling, trombone sniper (RMB zoom), tuba rocket
+  launcher (rocket jumps work), bass-drum shock cannon (360-degree
+  concussive knockback — the terrain-kill tool), violin air cutter (blades
+  ricochet off walls), triangle sidearm pistol, maracas melee, and the
+  horn grapple hook on E (raycast hook, momentum kept on release).
+- **Two maps from the concept art**, selectable in the menu:
+  *The Mixer* (neon cargo streets — BLUE/RED bases, rotating vinyl deck,
+  BASS TRAP pads, the skybridge; deathmatch) and *The Ring Concert Hall*
+  (steampunk opera house — the golden podium floats over the Soundwave
+  Precipice with two bridges; falling in is death, and matches are
+  king-of-the-hill: hold the podium for 120 seconds).
 - **Movement:** sprint, jump, power slide (vinyl-scratch sfx), and the
   proposal's **Beat Dash** — dash on the musical beat for bonus distance.
   Sonic jump pads launch you to catwalk height.

@@ -165,6 +165,9 @@ class Bot extends Actor {
     this.respawnTimer = 0;
     this.aimPitch = 0;
     this.skill = 0.55 + Math.random() * 0.35;
+    // every bot plays its own instrument (tracer color / killfeed / sound)
+    this.w = [0, 1, 2, 3, 7][(Math.random() * 5) | 0];
+    this.ctl = 0; // podium seconds (hall)
     this.respawn();
   }
 
@@ -249,6 +252,21 @@ class Bot extends Actor {
 
     // physics (same collision as the player)
     if (wish.lengthSq() > 0) wish.normalize();
+    // precipice avoidance: don't walk onto a drop unless a bridge carries it
+    if (g.world.podium && wish.lengthSq() > 0) {
+      const ax = this.pos.x + wish.x * 1.5, az = this.pos.z + wish.z * 1.5;
+      if (g.world.groundY(ax, az) < -1 && this.pos.y > -1) {
+        let onBridge = false;
+        for (const c of g.world.colliders) {
+          if (ax > c.minX && ax < c.maxX && az > c.minZ && az < c.maxZ && c.maxY >= -0.2 && c.maxY <= 0.8) { onBridge = true; break; }
+        }
+        if (!onBridge) {
+          // slide along the rim instead
+          const tx = -wish.z, tz = wish.x;
+          wish.set(tx * this.strafeDir, 0, tz * this.strafeDir);
+        }
+      }
+    }
     const speed = 5.4;
     this.vel.x += (wish.x * speed - this.vel.x) * Math.min(1, dt * 8);
     this.vel.z += (wish.z * speed - this.vel.z) * Math.min(1, dt * 8);
@@ -256,6 +274,18 @@ class Bot extends Actor {
     const grounded = g.moveWithCollisions(this.pos, this.vel, dt, 0.42, 1.8);
     if (grounded && this.enemy && Math.random() < dt * 0.35) this.vel.y = 8.5; // combat hop
     g.checkJumpPad(this);
+
+    // the precipice spares no one
+    if (this.pos.y < -5) {
+      this.die();
+      g.killfeed('THE PRECIPICE', this.name, '🕳️', false);
+      return;
+    }
+    // contest the podium
+    if (g.world.podium && g.mode !== 'training' &&
+        Math.hypot(this.pos.x, this.pos.z) <= g.world.podium.r && this.pos.y > 0.3) {
+      this.ctl += dt;
+    }
 
     // firing
     if (this.enemy) {
@@ -293,7 +323,12 @@ class Bot extends Actor {
     this.enemy = best;
     if (Math.random() < 0.3) this.strafeDir *= -1;
     if (!this.enemy && !this.nav) {
-      this.nav = g.world.navPoints[(Math.random() * g.world.navPoints.length) | 0];
+      // on the hall map, bots want the podium (KOTH); elsewhere they roam
+      if (g.world.podium && g.mode !== 'training' && Math.random() < 0.45) {
+        this.nav = g.world.navPoints[0];
+      } else {
+        this.nav = g.world.navPoints[(Math.random() * g.world.navPoints.length) | 0];
+      }
       this.navTimer = 9;
     }
   }
@@ -309,12 +344,15 @@ class Bot extends Actor {
     to.y += (Math.random() - 0.5) * err;
     to.z += (Math.random() - 0.5) * err;
     const dir = to.sub(from).normalize();
+    const wDef = WEAPONS[this.w];
     const hit = g.raycastShot(from, dir, 70, this.id);
     const end = hit ? hit.point : from.clone().addScaledVector(dir, 70);
     const mzl = new THREE.Vector3();
     this.parts.muzzle.getWorldPosition(mzl);
-    VFX.tracer(mzl, end, this.colorHex);
-    VFX.flash(mzl, this.colorHex, 1.2, 5);
+    VFX.tracer(mzl, end, wDef.tracerColor);
+    VFX.flash(mzl, wDef.tracerColor, 1.2, 5);
+    // their instrument, audible when the fight is near
+    if (dist < 55 && Math.random() < 0.45) wDef.sfx();
     if (hit && hit.actor) g.applyDamage(hit.actor, 7, this, hit.point);
     else if (hit) VFX.spark(hit.point, 0xaab0c0, 4, 5);
   }
