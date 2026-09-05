@@ -127,6 +127,11 @@ h2.subtitle {
   box-shadow: 0 0 30px rgba(61,232,255,0.4), inset 0 1px 0 rgba(255,255,255,0.5);
 }
 .big-btn.alt:hover { box-shadow: 0 0 52px rgba(61,232,255,0.7), inset 0 1px 0 rgba(255,255,255,0.5); }
+.big-btn.gold {
+  background: linear-gradient(180deg, #ffe2a0, var(--amber) 55%, #cf8f1d);
+  box-shadow: 0 0 30px rgba(255,194,77,0.4), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+.big-btn.gold:hover { box-shadow: 0 0 52px rgba(255,194,77,0.7), inset 0 1px 0 rgba(255,255,255,0.5); }
 .btn-sub { font-size: 11px; font-weight: 600; letter-spacing: 0.28em; opacity: 0.75; }
 #matchend .big-btn, #pause .big-btn { margin: 8px; }
 

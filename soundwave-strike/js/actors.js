@@ -37,7 +37,7 @@ function buildSoldier(colorHex) {
   g.add(vestM);
   // chest light + shoulder stripes in team color
   const chest = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.02), accent);
-  chest.position.set(-0.16, 1.32, 0.2);
+  chest.position.set(-0.16, 1.32, -0.2);
   g.add(chest);
   for (const s of [-1, 1]) {
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.03, 0.3), accent);
@@ -77,7 +77,7 @@ function buildSoldier(colorHex) {
   helmet.position.y = 1.74;
   g.add(helmet);
   const visor = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.07, 0.02), accent);
-  visor.position.set(0, 1.64, 0.16);
+  visor.position.set(0, 1.64, -0.16);
   g.add(visor);
 
   g.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
@@ -146,9 +146,11 @@ class Actor {
 
 /* ── Bot AI: free-for-all deathmatch brain ── */
 class Bot extends Actor {
-  constructor(id, name, colorHex, scene, game) {
+  constructor(id, name, colorHex, scene, game, opts = {}) {
     super(id, name, colorHex, scene);
     this.game = game;
+    this.dummy = !!opts.dummy;   // training target: never moves, never fights back
+    this.post = opts.post || null;
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     this.yaw = Math.random() * Math.PI * 2;
@@ -167,7 +169,7 @@ class Bot extends Actor {
   }
 
   respawn() {
-    const s = this.game.pickSpawn();
+    const s = this.dummy ? this.post : this.game.pickSpawn();
     this.pos.set(s.x, s.y, s.z);
     this.vel.set(0, 0, 0);
     this.hp = 100;
@@ -175,13 +177,17 @@ class Bot extends Actor {
     this.setVisible(true);
     this.nav = null;
     this.enemy = null;
+    if (this.dummy) {
+      this.model.position.copy(this.pos);
+      VFX.ring(new THREE.Vector3(this.pos.x, this.pos.y + 0.2, this.pos.z), 0xffc24d, 3);
+    }
   }
 
   die() {
     this.alive = false;
     this.deaths++;
     this.setVisible(false);
-    this.respawnTimer = 3;
+    this.respawnTimer = this.dummy ? 2 : 3;
     VFX.noteBurst(this.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), this.colorHex, 5);
     VFX.spark(this.pos.clone().add(new THREE.Vector3(0, 1, 0)), this.colorHex, 16, 6);
   }
@@ -193,6 +199,15 @@ class Bot extends Actor {
     if (!this.alive) {
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) this.respawn();
+      return;
+    }
+
+    if (this.dummy) {
+      // practice target: hold the post, always face the player
+      const to = new THREE.Vector3().subVectors(g.pos, this.pos);
+      this.yaw = Math.atan2(-to.x, -to.z);
+      this.model.position.copy(this.pos);
+      this.model.rotation.y = this.yaw;
       return;
     }
 
@@ -260,7 +275,7 @@ class Bot extends Actor {
     // pose
     this.model.position.copy(this.pos);
     this.model.rotation.y = this.yaw;
-    this.parts.aim.rotation.x = -this.aimPitch;
+    this.parts.aim.rotation.x = this.aimPitch;
     this.animate(dt, new THREE.Vector2(this.vel.x, this.vel.z).length());
   }
 
@@ -343,7 +358,7 @@ class RemoteAvatar extends Actor {
     const yaw = a.yaw + dyaw * f;
     const pitch = a.pitch + (b.pitch - a.pitch) * f;
     this.model.position.copy(this.pos);
-    this.model.rotation.y = yaw + Math.PI;
+    this.model.rotation.y = yaw;
     this.parts.aim.rotation.x = pitch;
     this.setVisible(true);
     this.animate(dt, this.lastSpeed);

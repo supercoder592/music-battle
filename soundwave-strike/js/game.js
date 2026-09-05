@@ -176,6 +176,7 @@ class Game {
     $('callsign').value = saved || 'MAESTRO-' + (100 + Math.random() * 900 | 0);
     $('btn-bots').addEventListener('click', () => this.startMatch('bots'));
     $('btn-online').addEventListener('click', () => this.startMatch('online'));
+    $('btn-training').addEventListener('click', () => this.startMatch('training'));
     $('btn-resume').addEventListener('click', () => this.resume());
     $('btn-quit').addEventListener('click', () => this.toMenu());
     $('btn-again').addEventListener('click', () => this.startMatch(this.mode));
@@ -313,6 +314,20 @@ class Game {
       for (let i = 0; i < 5; i++) {
         this.bots.push(new Bot('bot' + i, BOT_NAMES[i], ACTOR_COLORS[(this.myColorIdx + 1 + i) % ACTOR_COLORS.length], this.scene, this));
       }
+    } else if (mode === 'training') {
+      // soundcheck range: harmless dummies at varied ranges & heights
+      const posts = [
+        { x: 0, y: 2.4, z: 0 },       // center platform
+        { x: -12, y: 0, z: -14 },     // mid lane
+        { x: 14, y: 0, z: 10 },       // mid lane
+        { x: -30, y: 0, z: 8 },       // long range
+        { x: 8, y: 6.5, z: -37.5 },   // catwalk (verticality)
+        { x: 26, y: 0, z: -30 },      // corner
+        { x: -18, y: 0, z: 28 },      // corner
+      ];
+      posts.forEach((post, i) => {
+        this.bots.push(new Bot('dummy' + i, 'TARGET-' + (i + 1), 0xffc24d, this.scene, this, { dummy: true, post }));
+      });
     }
     this.input.keys = {};
     this.input.fire = false;
@@ -327,13 +342,13 @@ class Game {
     $('matchend').classList.add('hidden');
     $('respawn-msg').classList.add('hidden');
     $('hud').classList.remove('hidden');
-    $('match-goal').textContent = mode === 'bots' ? `FIRST TO ${this.killGoal}` : 'ONLINE JAM';
+    $('match-goal').textContent = mode === 'bots' ? `FIRST TO ${this.killGoal}` : (mode === 'training' ? 'SOUNDCHECK' : 'ONLINE JAM');
     this.buildWeaponRow();
     this.switchWeapon(0);
     this.updateHud();
     this.tryLock();
     this.pushPresence(true);
-    this.centerMsg(mode === 'bots' ? 'DROP THE BEAT' : 'JAM SESSION LIVE', 1.4);
+    this.centerMsg(mode === 'bots' ? 'DROP THE BEAT' : (mode === 'training' ? 'SOUNDCHECK — PLAY FREELY' : 'JAM SESSION LIVE'), 1.6);
   }
 
   pause() {
@@ -532,6 +547,7 @@ class Game {
 
   takeDamage(dmg, attacker) {
     if (!this.alive) return;
+    if (this.mode === 'training') return; // nothing can hurt you at soundcheck
     this.hp -= dmg;
     this.lastCombat = this.time;
     AUDIO.hurt();
