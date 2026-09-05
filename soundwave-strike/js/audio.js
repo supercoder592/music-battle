@@ -163,69 +163,127 @@ class SWAudio {
     this.musicBus.gain.linearRampToValueAtTime(0.75, t + time);
   }
 
-  /* ── weapon voices ── */
+  /* browsers can hand back a suspended context inside an embed — poke it
+     from any user gesture */
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  }
 
-  trumpetShot() { // shotgun: brass stab chord + blast noise
-    if (!this.enabled) return;
-    const t = this.ctx.currentTime;
-    for (const m of [1, 1.26, 1.5]) {
+  /* ── weapon voices ──
+     Real brass synthesis: detuned sawtooths through a lowpass whose
+     cutoff *opens* during the attack (the "wah" that makes brass read
+     as brass), with a pitch rip up into the note. */
+
+  _brass(freq, t, dur, vol, { rip = 0.75, bright = 5, vib = 0 } = {}) {
+    const flt = this.ctx.createBiquadFilter();
+    flt.type = 'lowpass';
+    flt.Q.value = 2.2;
+    flt.frequency.setValueAtTime(freq * 1.4, t);
+    flt.frequency.exponentialRampToValueAtTime(freq * bright, t + dur * 0.22); // wah opens
+    flt.frequency.exponentialRampToValueAtTime(freq * 2, t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.025);
+    g.gain.setValueAtTime(vol, t + dur * 0.55);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    flt.connect(g); g.connect(this.sfxBus);
+    for (const det of [1, 1.006, 0.994]) {
       const o = this.ctx.createOscillator();
       o.type = 'sawtooth';
-      o.frequency.setValueAtTime(220 * m * 0.8, t);
-      o.frequency.exponentialRampToValueAtTime(220 * m, t + 0.03);
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(0.1, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
-      o.connect(g); g.connect(this.sfxBus);
-      o.start(t); o.stop(t + 0.25);
+      o.frequency.setValueAtTime(freq * rip * det, t);
+      o.frequency.exponentialRampToValueAtTime(freq * det, t + 0.05); // rip up
+      if (vib > 0) {
+        const lfo = this.ctx.createOscillator();
+        lfo.frequency.value = 5.5;
+        const lg = this.ctx.createGain();
+        lg.gain.value = freq * vib;
+        lfo.connect(lg); lg.connect(o.frequency);
+        lfo.start(t); lfo.stop(t + dur + 0.05);
+      }
+      o.connect(flt);
+      o.start(t); o.stop(t + dur + 0.05);
     }
-    this._blastNoise(t, 0.14, 1100, 0.2);
+  }
+
+  trumpetShot() { // shotgun: bright trumpet triad stab — "TA-DA" with punch
+    if (!this.enabled) return;
+    const t = this.ctx.currentTime;
+    // E minor triad, trumpet register
+    this._brass(659.25, t, 0.34, 0.11, { bright: 6, rip: 0.72 });
+    this._brass(493.88, t, 0.34, 0.09, { bright: 6, rip: 0.72 });
+    this._brass(392.0, t + 0.015, 0.32, 0.08, { bright: 6, rip: 0.72 });
+    this._blastNoise(t, 0.08, 1600, 0.1); // breath chiff
     this.duck(0.5, 0.25);
   }
 
-  smgShot() { // snare drum: tight crack
+  smgShot() { // snare drum hit: skin tone + wire buzz + stick snap
     if (!this.enabled) return;
     const t = this.ctx.currentTime;
-    this._blastNoise(t, 0.05, 2600, 0.11);
+    // drum skin body
     const o = this.ctx.createOscillator();
     o.type = 'triangle';
-    o.frequency.setValueAtTime(this.quantize(300 + Math.random() * 200) * 2, t);
+    o.frequency.setValueAtTime(196, t);
+    o.frequency.exponentialRampToValueAtTime(150, t + 0.06);
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.05, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
     o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t + 0.06);
+    o.start(t); o.stop(t + 0.09);
+    // snare wires
+    const buzz = this.ctx.createBufferSource();
+    buzz.buffer = this._noiseBuf(0.09);
+    const bf = this.ctx.createBiquadFilter();
+    bf.type = 'bandpass'; bf.frequency.value = 1500; bf.Q.value = 0.6;
+    const bg = this.ctx.createGain();
+    bg.gain.setValueAtTime(0.13, t);
+    bg.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    buzz.connect(bf); bf.connect(bg); bg.connect(this.sfxBus);
+    buzz.start(t);
+    // stick snap
+    this._blastNoise(t, 0.025, 5200, 0.07);
   }
 
-  sniperShot() { // trombone: deep gliss + heavy crack
+  sniperShot() { // trombone: long powerful gliss DOWN the slide + crack
     if (!this.enabled) return;
     const t = this.ctx.currentTime;
-    const o = this.ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(392, t);
-    o.frequency.exponentialRampToValueAtTime(98, t + 0.35);
+    const flt = this.ctx.createBiquadFilter();
+    flt.type = 'lowpass';
+    flt.Q.value = 3;
+    flt.frequency.setValueAtTime(2600, t);
+    flt.frequency.exponentialRampToValueAtTime(300, t + 0.6);
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.2, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
-    o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t + 0.55);
-    this._blastNoise(t, 0.2, 700, 0.28);
-    this.duck(0.3, 0.5);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+    flt.connect(g); g.connect(this.sfxBus);
+    for (const det of [1, 1.005]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(311 * det, t);       // Eb4…
+      o.frequency.exponentialRampToValueAtTime(82.4 * det, t + 0.55); // …slides to E2
+      o.connect(flt);
+      o.start(t); o.stop(t + 0.7);
+    }
+    this._blastNoise(t, 0.16, 900, 0.24);
+    this.duck(0.3, 0.55);
   }
 
-  rocketLaunch() { // tuba: fat sub blast + whoosh
+  rocketLaunch() { // tuba: huge low-brass BWAAAH + launch whoosh
     if (!this.enabled) return;
     const t = this.ctx.currentTime;
+    this._brass(82.4, t, 0.55, 0.3, { bright: 8, rip: 0.6, vib: 0.02 }); // E2 blast
+    // sub reinforcement
     const o = this.ctx.createOscillator();
     o.type = 'sine';
-    o.frequency.setValueAtTime(90, t);
-    o.frequency.exponentialRampToValueAtTime(45, t + 0.4);
+    o.frequency.setValueAtTime(82.4, t);
+    o.frequency.exponentialRampToValueAtTime(41.2, t + 0.5);
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.3, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    g.gain.setValueAtTime(0.26, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
     o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t + 0.5);
-    this._blastNoise(t, 0.3, 500, 0.2, true);
+    o.start(t); o.stop(t + 0.6);
+    this._blastNoise(t, 0.3, 500, 0.16, true);
+    this.duck(0.4, 0.4);
   }
 
   explosion() {

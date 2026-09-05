@@ -85,26 +85,61 @@ class Game {
     requestAnimationFrame(ts => this.frame(ts));
   }
 
-  /* ── input ── */
+  /* ── input ──
+     Pointer lock is the primary path. Inside an embedded page (the
+     published artifact iframe) requestPointerLock can be refused, so a
+     free-look fallback keeps mouse aim and firing fully working:
+     movementX/Y still arrive on plain mousemove without a lock. */
+  canLook() {
+    return document.pointerLockElement === this.renderer.domElement || this.lookFallback;
+  }
+
+  tryLock() {
+    const c = this.renderer.domElement;
+    if (this.lookFallback || document.pointerLockElement === c) return;
+    try {
+      const p = c.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(() => this.enableFallback());
+    } catch (err) {
+      this.enableFallback();
+    }
+    // some embeds silently ignore the request — detect and fall back
+    clearTimeout(this._lockProbe);
+    this._lockProbe = setTimeout(() => {
+      if (document.pointerLockElement !== c && (this.state === 'playing' || this.state === 'dead')) {
+        this.enableFallback();
+      }
+    }, 900);
+  }
+
+  enableFallback() {
+    if (this.lookFallback) return;
+    this.lookFallback = true;
+    this.renderer.domElement.style.cursor = 'none';
+    this.centerMsg('FREE-LOOK MODE — MOVE MOUSE TO AIM', 2.2);
+  }
+
   bindInput() {
     const canvas = this.renderer.domElement;
     canvas.addEventListener('click', () => {
-      if (this.state === 'playing' || this.state === 'dead') {
-        if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
-      }
+      if ((this.state === 'playing' || this.state === 'dead') && !this.lookFallback) this.tryLock();
     });
+    document.addEventListener('pointerlockerror', () => this.enableFallback());
     document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement !== canvas && this.state === 'playing') this.pause();
+      if (document.pointerLockElement !== canvas && this.state === 'playing' && !this.lookFallback) this.pause();
     });
     document.addEventListener('mousemove', e => {
-      if (document.pointerLockElement !== canvas) return;
+      if (this.state !== 'playing' && this.state !== 'dead') return;
+      if (!this.canLook()) return;
       const sens = 0.0021 * (this.zoomed ? 0.45 : 1);
       this.yaw -= e.movementX * sens;
       this.pitch -= e.movementY * sens;
       this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
     });
     document.addEventListener('mousedown', e => {
-      if (this.state !== 'playing' || document.pointerLockElement !== canvas) return;
+      if (this.state !== 'playing') return;
+      AUDIO.resume();
+      if (!this.canLook()) { this.tryLock(); return; }
       if (e.button === 0) { this.input.fire = true; this.tryFire(); }
       if (e.button === 2) this.input.aim = true;
     });
@@ -122,6 +157,7 @@ class Game {
       if (k === 'tab') { e.preventDefault(); if (this.state === 'playing' || this.state === 'dead') $('scoreboard').classList.remove('hidden'); }
       if (this.state !== 'playing') { this.input.keys[k] = true; return; }
       this.input.keys[k] = true;
+      if (k === 'escape' && this.lookFallback) { this.pause(); return; }
       if (k === ' ') { e.preventDefault(); this.tryJump(); }
       if (k === 'shift') this.tryDash();
       if (k === 'c' || k === 'control') this.trySlide();
@@ -217,7 +253,7 @@ class Game {
     VFX.flash(from, w.tracerColor, 1.1, 5);
     if (d.w === 3) VFX.spawnRocket(from, to.clone().sub(from).normalize(), m.peer);
     const dist = from.distanceTo(new THREE.Vector3(this.pos.x, this.pos.y + this.eyeH, this.pos.z));
-    if (dist < 70) AUDIO.smgShot();
+    if (dist < 80) w.sfx(); // their instrument, heard in your key
   }
 
   onRemoteHit(m) {
@@ -295,7 +331,7 @@ class Game {
     this.buildWeaponRow();
     this.switchWeapon(0);
     this.updateHud();
-    this.renderer.domElement.requestPointerLock && this.renderer.domElement.requestPointerLock();
+    this.tryLock();
     this.pushPresence(true);
     this.centerMsg(mode === 'bots' ? 'DROP THE BEAT' : 'JAM SESSION LIVE', 1.4);
   }
@@ -309,7 +345,7 @@ class Game {
   resume() {
     this.state = 'playing';
     $('pause').classList.add('hidden');
-    this.renderer.domElement.requestPointerLock();
+    this.tryLock();
   }
 
   toMenu() {
@@ -894,6 +930,14 @@ class Game {
         this.hp = Math.min(100, this.hp + dt * 9);
         this.updateHud();
       }
+
+      // keyboard look (backup aim that works everywhere)
+      const lk = this.input.keys;
+      const lookSpd = 2.3 * dt;
+      if (lk['arrowleft']) this.yaw += lookSpd;
+      if (lk['arrowright']) this.yaw -= lookSpd;
+      if (lk['arrowup']) this.pitch = Math.min(1.45, this.pitch + lookSpd);
+      if (lk['arrowdown']) this.pitch = Math.max(-1.45, this.pitch - lookSpd);
 
       // movement
       const wish = this.wishDir();
